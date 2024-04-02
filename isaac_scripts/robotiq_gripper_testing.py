@@ -12,7 +12,7 @@ from omni.isaac.core.utils.stage import clear_stage, add_reference_to_stage
 my_kinova: Articulation
 
 async def move():
-    await asyncio.sleep(2)
+    # await asyncio.sleep(2)
     print("Resetting to zero")
     print(f"My kinova: {my_kinova}")
     my_kinova.apply_action(ArticulationAction(joint_positions=np.array([0, 2, 0, 6, 5, -5, 3, 0, 0, 0, 0, 0, 0])*0.3))
@@ -29,7 +29,7 @@ async def init():
     world: World = World()
     await world.initialize_simulation_context_async()
     world.scene.add_default_ground_plane()
-    set_camera_view(np.array([0, 2.0, 0.4]), np.array([0, 0, 0.4]))
+    set_camera_view(np.array([-1.5, 2.0, 1.5]), np.array([0, 0, 0.4]))
 
     # Load the robot TODO: Figure out relative paths
     prim_path = "/World/kinova"
@@ -62,9 +62,9 @@ async def init():
         print(f"Error: {e}")
 
     # Use the manipulator
-    print(f"Kinova has {my_kinova.num_dof} DoFs")
-    my_kinova.apply_action(ArticulationAction(joint_positions=np.array([0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0])*0.5))
-    print("Done")
+    # print(f"Kinova has {my_kinova.num_dof} DoFs")
+    # my_kinova.apply_action(ArticulationAction(joint_positions=np.array([0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0])*0.5))
+    # print("Done")
 
     await move()
 
