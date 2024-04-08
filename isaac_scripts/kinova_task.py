@@ -7,35 +7,41 @@ from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.prims import create_prim
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.viewports import set_camera_view
+from omni.isaac.core.objects import DynamicSphere
 
 import torch
 from gymnasium import spaces
 
 
 class KinovaTask(BaseTask):
-    # Alex
+    # Alex (Done)
     def __init__(self, name, offset=None):
-        # task-specific parameters
-        # TODO
+        # Task-specific parameters (fill in as you need them)
+        self._robot_lower_joint_limits  = np.deg2rad([-180.0, -128.9, -180.0, -147.8, -180.0, -120.3, -180.0], dtype=np.float32)
+        self._robot_upper_joint_limits  = -1.0 * self._robot_lower_joint_limits
+        self._gripper_lower_joint_limit = np.deg2rad([ 0.0], dtype=np.float32)
+        self._gripper_upper_joint_limit = np.deg2rad([46.0], dtype=np.float32)
 
-        # values used for defining RL buffers
-        self._num_observations = 4
-        self._num_actions = 1
+        # Values used for defining RL buffers
+        self._num_observations = 11 # 7 robot joint states, 1 gripper joint state and 3 ball states (TODO: Image input)
+        self._num_actions = 8 # 7 arm joint actions and 1 gripper joint action
         self._device = "cpu"
         self.num_envs = 1
 
-        # a few class buffers to store RL-related states
+        # A few class buffers to store RL-related states
         self.obs = torch.zeros((self.num_envs, self._num_observations))
         self.resets = torch.zeros((self.num_envs, 1))
 
-        # set the action and observation space for RL (lower and upper limits)
+        # Set the action space
         self.action_space = spaces.Box(
-            np.ones(self._num_actions, dtype=np.float32) * -1.0,
-            np.ones(self._num_actions, dtype=np.float32) * 1.0,
+            np.concatenate((self._robot_lower_joint_limits, self._gripper_lower_joint_limit)),
+            np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit))
         )
+
+        # Set the observation space (robot joints plus the ball xyz)
         self.observation_space = spaces.Box(
-            np.ones(self._num_observations, dtype=np.float32) * -np.Inf,
-            np.ones(self._num_observations, dtype=np.float32) * np.Inf,
+            np.concatenate((self._robot_lower_joint_limits, self._gripper_lower_joint_limit, -1.0*np.ones(1,3,dtype=np.float32)*np.Inf)),
+            np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit, +1.0*np.ones(1,3,dtype=np.float32)*np.Inf))
         )
 
         # trigger __init__ of parent class
@@ -57,7 +63,7 @@ class KinovaTask(BaseTask):
         scene.add_default_ground_plane()
 
         # Add and launch the ball
-        self._ball = world.scene.add(
+        self._ball = self.scene.add(
             DynamicSphere(
                 prim_path="/World/random_sphere",
                 name="tennis_ball",
@@ -86,8 +92,8 @@ class KinovaTask(BaseTask):
         """
         This gets executed once the scene is constructed and simulation starts running
         """
-        self._cart_dof_idx = self._robots.get_dof_index("cartJoint")
-        self._pole_dof_idx = self._robots.get_dof_index("poleJoint")
+        self._gripper_dof_index_1 = self._robots.get_dof_index("robotiq_85_left_knuckle_joint")
+        self._gripper_dof_index_2 = self._robots.get_dof_index("robotiq_85_right_knuckle_joint")
 
         # randomize all envs
         indices = torch.arange(
@@ -162,21 +168,16 @@ class KinovaTask(BaseTask):
 
     # Alex
     def get_observations(self):
-        dof_pos = self._robots.get_joint_positions()
-        dof_vel = self._robots.get_joint_velocities()
+        # Get the robot and ball state from the simulation
+        dof_pos  = self._robots.get_joint_positions()
+        dof_ball = self._ball.get_world_pose()
 
-        # collect pole and cart joint positions and velocities for observation
-        cart_pos = dof_pos[:, self._cart_dof_idx]
-        cart_vel = dof_vel[:, self._cart_dof_idx]
-        pole_pos = dof_pos[:, self._pole_dof_idx]
-        pole_vel = dof_vel[:, self._pole_dof_idx]
+        # Extract the information that we need for the model
+        joint_pos   = dof_pos[:, 0:7]
+        gripper_pos = dof_pos[:, self._gripper_dof_index_1] 
+        ball_pos    = dof_ball[:, 0]
 
-        self.obs[:, 0] = cart_pos
-        self.obs[:, 1] = cart_vel
-        self.obs[:, 2] = pole_pos
-        self.obs[:, 3] = pole_vel
-
-        return self.obs
+        return np.concatenate((joint_pos, gripper_pos, ball_pos))
 
     # Caleb
     def calculate_metrics(self) -> None:
