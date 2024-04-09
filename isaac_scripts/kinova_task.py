@@ -18,8 +18,8 @@ from kinova_view import KinovaView
 
 class KinovaTask(BaseTask):
     # Alex (Done)
-    def __init__(self, name, sim_config, env, offset=None):
-        self.update_config(sim_config)
+    def __init__(self, name, offset=None):
+        # self.update_config(sim_config)
         self._max_episode_length = 500
 
         # Task-specific parameters (fill in as you need them)
