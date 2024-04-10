@@ -76,40 +76,30 @@ class KinovaTask(BaseTask):
     # Caleb
     def set_up_scene(self, scene) -> None:
             # first create a single environment
-            # self.get_kinova()
+            self.get_kinova()
 
             # call the parent class to clone the single environment
-            # super().set_up_scene(scene)
+            super().set_up_scene(scene)
 
             # construct an ArticulationView object to hold our collection of environments
             self._kinovas = ArticulationView(
-                prim_paths_expr="/World/envs/.*/Kinova", name="kinova_view", reset_xform_properties=False
+                prim_paths_expr="/World/envs/kinova", name="kinova_view"
             )
+
             # register the ArticulationView object to the world, so that it can be initialized
-            # scene.add(self._kinovas)
-
-            # # self._kinovas = KinovaView(prim_paths_expr="/World/envs/.*/kinova", name="kinova_view")
-            # create_prim(prim_path="/World/kinova", prim_type="Xform", position=self._position)
-            # add_reference_to_stage(usd_path="/home/caleb/Research/kinova_ball_catching_RL/models/kinova_closed_loop.usd", "/World/kinova")
-            # self._kinovas = KinovaView(prim_paths_expr="/World/kinova", name="kinova_view")
-
             scene.add_default_ground_plane()
             scene.add(self._kinovas)
-            # scene.add(self._frankas._hands)
-            # scene.add(self._frankas._lfingers)
-            # scene.add(self._frankas._rfingers)
 
             # Add and launch the ball (this should maybe be moved to post_reset?)
-            self._ball = self.scene.add(
+            self._ball = scene.add(
                 DynamicSphere(
                     prim_path="/World/random_sphere",
                     name="tennis_ball",
                     position=np.array([0.3, 0.3, 0.3]),
                     scale=np.array([0.0515, 0.0515, 0.0515]),
                     color=np.array([0, 1.0, 0]),
-                    linear_velocity=np.array([1, -1, 0]),
                 )
-            )#TODO move to post reset
+            )
 
             # set default camera viewport position and target
             self.set_initial_camera_params()
@@ -118,10 +108,10 @@ class KinovaTask(BaseTask):
 
     # Caleb (used for set up)
     def get_kinova(self):
-        kinova = Kinova(prim_path="/home/caleb/Research/kinova_ball_catching_RL/isaac_scripts" + "/kinova", name="kinova")
-        self._sim_config.apply_articulation_settings(
-            "Kinova", get_prim_at_path(kinova.prim_path), self._sim_config.parse_actor_config("Kinova")
-        )
+        kinova = Kinova(prim_path="/World/envs/kinova", name="kinova")
+        # self._sim_config.apply_articulation_settings(
+        #     "Kinova", get_prim_at_path(kinova.prim_path), self._sim_config.parse_actor_config("Kinova")
+        # )
 
     # Crasun
     def set_initial_camera_params(
@@ -138,14 +128,14 @@ class KinovaTask(BaseTask):
         """
         This gets executed once the scene is constructed and simulation starts running
         """
-        self._gripper_dof_index_1 = self._robots.get_dof_index("robotiq_85_left_knuckle_joint")
-        self._gripper_dof_index_2 = self._robots.get_dof_index("robotiq_85_right_knuckle_joint")
+        self._gripper_dof_index_1 = self._kinovas.get_dof_index("robotiq_85_left_knuckle_joint")
+        self._gripper_dof_index_2 = self._kinovas.get_dof_index("robotiq_85_right_knuckle_joint")
 
         # randomize all envs
-        indices = torch.arange(
-            self._robots.count, dtype=torch.int64, device=self._device
-        )
-        self.reset(indices)
+        # indices = torch.arange(
+        #     self._robots.count, dtype=torch.int64, device=self._device
+        # )
+        # self.reset(indices)
         #TODO 
         #and set the velocity of the ball
 
@@ -200,11 +190,12 @@ class KinovaTask(BaseTask):
 
         # indices = torch.arange(self._cartpoles.count, dtype=torch.int32, device=self._device)
         indices = torch.arange(
-            self._robots.count, dtype=torch.int32, device=self._device
+            self._kinovas.count, dtype=torch.int32, device=self._device
         )
-        # self._cartpoles.set_joint_efforts(forces, indices=indices)
-        self._robots.set_joint_positions(positions=joint_state_actions, indices=indices)
+
         # TODO include apply action instead of set joint, double check syntax
+        self._kinovas.set_joint_positions(positions=torch.tensor([0.0]*13), indices=indices)
+        
         # References
         # https://docs.omniverse.nvidia.com/isaacsim/latest/isaac_gym_tutorials/tutorial_gym_isaac_gym_new_oige_example.html#isaac-sim-app-tutorial-gym-omni-isaac-gym-new-example
         # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.manipulators/docs/index.html
@@ -212,14 +203,18 @@ class KinovaTask(BaseTask):
     # Alex
     def get_observations(self):
         # Get the robot and ball state from the simulation
-        dof_pos  = self._robots.get_joint_positions()
+        dof_pos  = self._kinovas.get_joint_positions()
         dof_ball = self._ball.get_world_pose()
 
+        print(f"DoF ball: {dof_ball}\nDoF pos: {dof_pos}")
+
         # Extract the information that we need for the model
-        joint_pos   = dof_pos[:, 0:7]
-        gripper_pos = dof_pos[:, self._gripper_dof_index_1] 
-        ball_pos    = dof_ball[:, 0:3]
+        joint_pos   = dof_pos[0, 0:7]
+        gripper_pos = dof_pos[0, self._gripper_dof_index_1],
+        ball_pos    = dof_ball[0][0:3]
         #TODO include ball velocity
+
+        print(f"Ball pos: {ball_pos}\nJoint pos: {joint_pos}\nGripper pos: {gripper_pos}")
 
         # # populate the observations buffer                               #|
         # self.obs_buf[:, 0] = joint_pos                                   #|I added these to work with the calculate_metrics method
@@ -229,23 +224,25 @@ class KinovaTask(BaseTask):
         # observations = {self._cartpoles.name: {"obs_buf": self.obs_buf}} #|
     
         self.obs = np.concatenate((joint_pos, gripper_pos, ball_pos))#,observations
+        print(f"Self.obs: {self.obs}")
         return self.obs
     
     # Caleb
     def calculate_metrics(self) -> None:
         # use states from the observation buffer to compute reward
-        joint_pos = self.obs[:, 0]
-        gripper_pos = self.obs[:, 1]
-        ball_pos = self.obs[:, 2]
+        # TODO: Alter this for multiple robots
+        joint_pos = self.obs[:7]
+        gripper_pos = self.obs[7]
+        ball_pos = self.obs[8:]
 
         # define the reward function based on the end effector colliding with the ball
-        reward = torch.where(torch.abs(gripper_pos) == ball_pos, torch.ones_like(reward) * 2.0, reward)
+        # reward = torch.where(torch.abs(gripper_pos) == ball_pos, torch.ones_like(reward) * 2.0, reward)
 
         # define the reward function based on the end effector distance to the ball
         # first calculate euclidean dist between ball and gripper
-        ball_gripper_dist=math.sqrt((gripper_pos[0]-ball_pos[0])**2+(gripper_pos[1]-ball_pos[1])**2+(gripper_pos[2]-ball_pos[2])**2)
+        # ball_gripper_dist=math.sqrt((gripper_pos[0]-ball_pos[0])**2+(gripper_pos[1]-ball_pos[1])**2+(gripper_pos[2]-ball_pos[2])**2)
         # make the reward inversly proportional to ball to gripper distance
-        reward = 1.0 /(1+ball_gripper_dist)
+        # reward = 1.0 /(1+ball_gripper_dist)
         
         # # define the reward function based on the end effector not dropping the ball(hold of on this one probably)
         # reward = torch.where(torch.abs(gripper_pos) == ball_pos, torch.ones_like(reward) * 2.0, reward)
@@ -256,16 +253,16 @@ class KinovaTask(BaseTask):
 
         # # assign rewards to the reward buffer
         # self.rew_buf[:] = reward
-        return reward.item()
+        # return reward.item()
+        return 0.0
 
 
     # Crasun
     def is_done(self) -> None:
         # cart_pos = self.obs[:, 0]
         # pole_pos = self.obs[:, 2]
-        ball_pos = self.obs[
-            :, 2
-        ]  # ensure get_observations has ball_pos set in this column
+        ball_pos = torch.tensor(self.obs[8:])  # ensure get_observations has ball_pos set in this column
+        print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]}")
 
         # gripper_pos = self.obs[
         #     :, 1
@@ -274,9 +271,12 @@ class KinovaTask(BaseTask):
         # reset the robot if cart has reached reset_dist or pole is too far from upright
         # resets = torch.where(torch.abs(cart_pos) > self._reset_dist, 1, 0)
         # resets = torch.where(torch.abs(pole_pos) > math.pi / 2, 1, resets)
-        resets = torch.where(
-            ball_pos[3]  < .1 #if centroid? of ball is below 10 cm, end episode
-        )  # assuming we launch the ball such that the ball's x coodinate is greater than the gripper's.
+
+        # If centroid? of ball is below 10 cm, end episode
+        resets = torch.zeros(1, device=self._device, dtype=torch.long)
+        resets: torch.Tensor = torch.where(ball_pos[2] < 0.1, torch.ones_like(resets), resets)  
+        print(f"Resets: {resets}")
         self.resets = resets
 
-        return resets.item()
+        # return resets.item()
+        return [False]

@@ -4,6 +4,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import carb
 from omni.isaac.core.robots.robot import Robot
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.prims import get_prim_at_path
@@ -18,8 +19,7 @@ class Kinova(Robot):
         self,
         prim_path: str,
         name: Optional[str] = "kinova",
-        # usd_path: Optional[str] = None,
-        usd_path: Optional[str] = "/home/caleb/Research/kinova_ball_catching_RL/models/kinova_closed_loop.usd",
+        usd_path: Optional[str] = "/home/alex/workspaces/cs395T/src/kinova_ball_catching_RL/models/kinova_closed_loop.usd",
         translation: Optional[torch.tensor] = None,
         orientation: Optional[torch.tensor] = None,
     ) -> None:
@@ -30,12 +30,6 @@ class Kinova(Robot):
 
         self._position = torch.tensor([1.0, 0.0, 0.0]) if translation is None else translation
         self._orientation = torch.tensor([0.0, 0.0, 0.0, 1.0]) if orientation is None else orientation
-
-        if self._usd_path is None:
-            assets_root_path = get_assets_root_path()
-            if assets_root_path is None:
-                carb.log_error("Could not find Isaac Sim assets folder")
-            self._usd_path = assets_root_path + "/Isaac/Robots/Franka/franka_instanceable.usd"
 
         add_reference_to_stage(self._usd_path, prim_path)
 
