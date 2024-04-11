@@ -20,7 +20,6 @@ from omni.isaac.dynamic_control import _dynamic_control
 dc = _dynamic_control.acquire_dynamic_control_interface()
 
 class KinovaTask(BaseTask):
-    # Alex (Done)
     def __init__(self, name, offset=None):
         # self.update_config(sim_config)
         self._max_episode_length = 500
@@ -56,7 +55,6 @@ class KinovaTask(BaseTask):
         # trigger __init__ of parent class
         BaseTask.__init__(self, name=name, offset=offset)
 
-    # Caleb (used for set up)
     def update_config(self, sim_config):
         # extract task config from main config dictionary
         self._sim_config = sim_config
@@ -72,7 +70,6 @@ class KinovaTask(BaseTask):
         self._reset_dist = self._task_cfg["env"]["resetDist"]
         self._max_push_effort = self._task_cfg["env"]["maxEffort"]
     
-    # Caleb
     def set_up_scene(self, scene) -> None:
             # first create a single environment
             self.get_kinova()
@@ -105,16 +102,14 @@ class KinovaTask(BaseTask):
 
             return
 
-    # Caleb (used for set up)
     def get_kinova(self):
-        kinova = Kinova(prim_path="/World/envs/kinova", name="kinova")
+        self._kinova: Kinova = Kinova(prim_path="/World/envs/kinova", name="kinova")
         # self._sim_config.apply_articulation_settings(
         #     "Kinova", get_prim_at_path(kinova.prim_path), self._sim_config.parse_actor_config("Kinova")
         # )
 
-    # Crasun
     def set_initial_camera_params(
-        self, camera_position=[10, 10, 3], camera_target=[0, 0, 0]
+        self, camera_position=[5, -7, 3], camera_target=[0, 0, 1]
     ):
         set_camera_view(
             eye=camera_position,
@@ -122,7 +117,6 @@ class KinovaTask(BaseTask):
             camera_prim_path="/OmniverseKit_Persp",
         )  # need to test this in GUI
 
-    # Alex
     def post_reset(self):
         """
         This gets executed once the scene is constructed and simulation starts running
@@ -138,7 +132,9 @@ class KinovaTask(BaseTask):
         #TODO 
         #and set the velocity of the ball
 
-    # Caleb
+    def randomize_ball_velocity() -> list:
+        pass 
+
     def reset(self, env_ids=None):
         """
         This method is used to set our environment into an initial state for starting a new training episode
@@ -148,7 +144,8 @@ class KinovaTask(BaseTask):
         num_resets = len(env_ids)
 
         # zero DOF positions and velocities
-        dof_pos = torch.zeros((num_resets, self._kinovas.num_dof), device=self._device)
+        dof_pos = torch.tensor(np.array([0, 2, 0, 6, 5, -5, -3, 0, 0, 0, 0, 0, 0], dtype=np.float32)*0.3, device=self._device)
+        # dof_pos = torch.zeros((num_resets, self._kinovas.num_dof), device=self._device)
         dof_vel = torch.zeros((num_resets, self._kinovas.num_dof), device=self._device)
 
         # reset configuration of the robot
@@ -157,14 +154,13 @@ class KinovaTask(BaseTask):
         self._kinovas.set_joint_velocities(dof_vel, indices=indices)
 
         # reset configuration of the ball
-        self._ball.set_world_pose([0.3, 0.3, 0.3])
-        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 0.0, 5.0])
+        self._ball.set_world_pose([0.5, -1.5, 0.3])
+        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
 
         # bookkeeping
         # self.resets[env_ids] = 0
 
 
-    # Crasun
     def pre_physics_step(self, actions) -> None:
         """
         This method will be called from VecEnvBase before each simulation step, and will pass in actions from the RL policy as an argument
@@ -176,19 +172,19 @@ class KinovaTask(BaseTask):
 
         # actions = torch.tensor(actions)
         joint_state_actions = torch.tensor(actions)
-        print(f"Joint state actions: {joint_state_actions}")
+        # print(f"Joint state actions: {joint_state_actions}")
 
         full_dof_actions = torch.zeros(13, dtype=torch.float32)
         full_dof_actions[:7] = joint_state_actions[:7]
-        full_dof_actions[11] = joint_state_actions[-1]
-        full_dof_actions[12] = -1.0 * joint_state_actions[-1]
+        full_dof_actions[self._gripper_dof_index_1] = joint_state_actions[-1]
+        full_dof_actions[self._gripper_dof_index_2] = -1.0 * joint_state_actions[-1]
+        # print(f"{full_dof_actions}")
 
         # indices = torch.arange(self._cartpoles.count, dtype=torch.int32, device=self._device)
         indices = torch.arange(
             self._kinovas.count, dtype=torch.int32, device=self._device
         )
 
-        # TODO include apply action instead of set joint, double check syntax
         self._kinovas.apply_action(
             ArticulationAction(
                 joint_positions=full_dof_actions,
@@ -199,14 +195,13 @@ class KinovaTask(BaseTask):
         # https://docs.omniverse.nvidia.com/isaacsim/latest/isaac_gym_tutorials/tutorial_gym_isaac_gym_new_oige_example.html#isaac-sim-app-tutorial-gym-omni-isaac-gym-new-example
         # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.manipulators/docs/index.html
 
-    # Alex
     def get_observations(self):
         # Get the robot and ball state from the simulation
         dof_pos  = self._kinovas.get_joint_positions()
         dof_ball = self._ball.get_world_pose()
         vel_ball = dc.get_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path))
 
-        print(f"DoF ball: {dof_ball}\nDoF pos: {dof_pos}\nVel ball: {vel_ball}")
+        # print(f"DoF ball: {dof_ball}\nDoF pos: {dof_pos}\nVel ball: {vel_ball}")
 
         # Extract the information that we need for the model
         joint_pos   = dof_pos[0, 0:7]
@@ -215,7 +210,7 @@ class KinovaTask(BaseTask):
         ball_vel    = vel_ball
         #TODO include ball velocity
 
-        print(f"Ball pos: {ball_pos}\nJoint pos: {joint_pos}\nGripper pos: {gripper_pos}\nBall vel: {ball_vel}")
+        # print(f"Ball pos: {ball_pos}\nJoint pos: {joint_pos}\nGripper pos: {gripper_pos}\nBall vel: {ball_vel}")
 
         # # populate the observations buffer                               #|
         # self.obs_buf[:, 0] = joint_pos                                   #|I added these to work with the calculate_metrics method
@@ -226,51 +221,44 @@ class KinovaTask(BaseTask):
     
         obs = np.concatenate((joint_pos, gripper_pos, ball_pos, ball_vel))
         self.obs = torch.tensor(obs)
-        print(f"Self.obs: {self.obs}")
+        # print(f"Self.obs: {self.obs}")
         return self.obs
     
-    # Caleb
-    def calculate_metrics(self) -> None:
+    def calculate_metrics(self) -> float:
         # use states from the observation buffer to compute reward
         # TODO: Alter this for multiple robots
-        joint_pos = self.obs[:7]
-        gripper_pos = self.obs[7]
-        ball_pos = self.obs[8:]
+        joint_angles = self.obs[:7]
+        gripper_angle = self.obs[7]
+        ball_pos = np.array(self.obs[8:11])
+        ball_vel = np.array(self.obs[11:])
 
-        # define the reward function based on the end effector colliding with the ball
-        # reward = torch.where(torch.abs(gripper_pos) == ball_pos, torch.ones_like(reward) * 2.0, reward)
+        left_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_left_finger_tip_link"))
+        right_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_right_finger_tip_link"))
+        gripper_pos = 0.5*(np.array(left_finger_pose.p) + np.array(right_finger_pose.p))
 
-        # define the reward function based on the end effector distance to the ball
-        # first calculate euclidean dist between ball and gripper
-        # ball_gripper_dist=math.sqrt((gripper_pos[0]-ball_pos[0])**2+(gripper_pos[1]-ball_pos[1])**2+(gripper_pos[2]-ball_pos[2])**2)
-        # make the reward inversly proportional to ball to gripper distance
-        # reward = 1.0 /(1+ball_gripper_dist)
-        
-        # # define the reward function based on the end effector not dropping the ball(hold of on this one probably)
-        # reward = torch.where(torch.abs(gripper_pos) == ball_pos, torch.ones_like(reward) * 2.0, reward)
-        
-        # # penalize the policy if the end effector drops the ball 
-        # reward = torch.where(torch.abs(cart_pos) > self._reset_dist, torch.ones_like(reward) * -2.0, reward)
+        # print(f"Left finger pose: {left_finger_pose} | Right finger pose: {right_finger_pose}")
+        # print(f"Gripper position is {gripper_pos}")
 
+        # Success - whether the ball collided with the gripper
+        # d_min   - Minimum distance between the ball and the gripper
+        # H       - Whether we maintained hold of the ball
+        # C       - Whether we collided with robot or the ground
+        # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C 
+        ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
 
-        # # assign rewards to the reward buffer
-        # self.rew_buf[:] = reward
-        # return reward.item()
-        return 0.0
+        return (1.0/(ball_gripper_dist + 1.0)) + (ball_gripper_dist < 0.10)
 
-
-    # Crasun
     def is_done(self) -> None:
         # cart_pos = self.obs[:, 0]
         # pole_pos = self.obs[:, 2]
         ball_pos = torch.tensor(self.obs[8:11])  # ensure get_observations has ball_pos set in this column
-        print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]}")
+        # print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]}")
 
         # TODO: Handle if the robot catches the ball
 
         # If centroid? of ball is below 10 cm, end episode
         resets = torch.where(ball_pos[2] < 0.1, 1, 0)  
-        print(f"Resets: {resets}")
+        # print(f"Resets: {resets}")
         self.resets = resets
 
         return resets.item()

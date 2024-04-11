@@ -65,28 +65,6 @@ class Kinova(Robot):
 
         ]
 
-        drive_type = ["angular"] * 15 # + ["linear"] * 2
-        default_dof_pos = [math.degrees(x) for x in [0.0, -1.0, 0.0, -2.2, 0.0, 2.4, 0.8, 0, 0, 0, 0, 0, 0, 0, 0]] #+ [0.02, 0.02]
-        stiffness = [400 * np.pi / 180] * 15 #+ [10000] * 2
-        damping = [80 * np.pi / 180] * 15 #+ [100] * 2
-        max_force = [87, 87, 87, 87, 12, 12, 12, 87, 87, 87, 87, 87, 87, 87, 87]#200, 200]
-        max_velocity = [math.degrees(x) for x in [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61, 2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61, 2.61]] #+ [0.2, 0.2]
-
-        for i, dof in enumerate(dof_paths):
-            set_drive(
-                prim_path=f"{self.prim_path}/{dof}",
-                drive_type=drive_type[i],
-                target_type="position",
-                target_value=default_dof_pos[i],
-                stiffness=stiffness[i],
-                damping=damping[i],
-                max_force=max_force[i],
-            )
-
-            PhysxSchema.PhysxJointAPI(get_prim_at_path(f"{self.prim_path}/{dof}")).CreateMaxJointVelocityAttr().Set(
-                max_velocity[i]
-            )
-
     def set_kinova_properties(self, stage, prim):
         for link_prim in prim.GetChildren():
             if link_prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI): 
