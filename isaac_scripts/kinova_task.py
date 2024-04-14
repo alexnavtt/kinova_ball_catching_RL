@@ -263,7 +263,7 @@ class KinovaTask(BaseTask):
 
 
      
-        print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]} | ball_vel_norm: {torch.norm(ball_vel)}")
+        # print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]} | ball_vel_norm: {torch.norm(ball_vel)}")
 
         # TODO: Handle if the robot catches the ball... Done
 
