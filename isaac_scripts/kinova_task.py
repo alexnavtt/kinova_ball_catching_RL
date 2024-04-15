@@ -131,6 +131,8 @@ class KinovaTask(BaseTask):
         # self.reset(indices)
         #TODO
         #and set the velocity of the ball
+        sampled_ball_velocity = self.sample_launch_velocity(speed=0.1,cone_angle=10)
+        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
 
     def sample_launch_velocity(speed, cone_angle) -> list:
         """
@@ -179,7 +181,7 @@ class KinovaTask(BaseTask):
 
         # reset configuration of the ball
         self._ball.set_world_pose([0.5, -1.5, 0.3])
-        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
+        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
 
         # bookkeeping
         # self.resets[env_ids] = 0
