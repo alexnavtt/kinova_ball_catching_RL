@@ -69,7 +69,7 @@ class KinovaTask(BaseTask):
         # reset and actions related variables
         self._reset_dist = self._task_cfg["env"]["resetDist"]
         self._max_push_effort = self._task_cfg["env"]["maxEffort"]
-    
+
     def set_up_scene(self, scene) -> None:
             # first create a single environment
             self.get_kinova()
@@ -129,11 +129,21 @@ class KinovaTask(BaseTask):
         #     self._robots.count, dtype=torch.int64, device=self._device
         # )
         # self.reset(indices)
-        #TODO 
+        #TODO
         #and set the velocity of the ball
 
-    def randomize_ball_velocity() -> list:
-        pass 
+    def sample_launch_velocity(speed, cone_angle) -> list:
+        """
+        Samples a random launch velocity within a velocity cone defined by a cone angle and speed
+
+        Args:
+        speed: The magnitude of the velocity to be sampled
+        cone_angle: The angle in degrees that bounds the velocity cone. 0 deg corresponds to straight line.
+
+        Returns: A list representing the sampled velocity (V_x, V_y, V_z)
+        """
+
+        pass
 
     def reset(self, env_ids=None):
         """
@@ -218,12 +228,12 @@ class KinovaTask(BaseTask):
         # self.obs_buf[:, 2] = ball_pos                                    #|
         # # construct the observations dictionary and return               #|
         # observations = {self._cartpoles.name: {"obs_buf": self.obs_buf}} #|
-    
+
         obs = np.concatenate((joint_pos, gripper_pos, ball_pos, ball_vel))
         self.obs = torch.tensor(obs)
         # print(f"Self.obs: {self.obs}")
         return self.obs
-    
+
     def calculate_metrics(self) -> float:
         # use states from the observation buffer to compute reward
         # TODO: Alter this for multiple robots
@@ -243,7 +253,7 @@ class KinovaTask(BaseTask):
         # d_min   - Minimum distance between the ball and the gripper
         # H       - Whether we maintained hold of the ball
         # C       - Whether we collided with robot or the ground
-        # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C 
+        # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C
         ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
 
         return (1.0/(ball_gripper_dist + 1.0)) + (ball_gripper_dist < 0.10)
@@ -262,14 +272,14 @@ class KinovaTask(BaseTask):
         ball_gripper_dist = torch.norm(gripper_pos - ball_pos)
 
 
-     
+
         # print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]} | ball_vel_norm: {torch.norm(ball_vel)}")
 
         # TODO: Handle if the robot catches the ball... Done
 
         # If centroid of ball is below 10 cm, end episode
         resets = torch.where(ball_pos[2] < 0.1, torch.tensor(1), torch.tensor(0))
-        
+
         # reset the robot if the ball is within a 10 cm of the grippers centroid and near stationary
         combined_condition = (ball_gripper_dist < 0.10) & (torch.norm(ball_vel) < 0.01)
         resets = torch.where(combined_condition, torch.tensor(1), resets)
