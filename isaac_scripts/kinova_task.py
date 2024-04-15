@@ -140,10 +140,24 @@ class KinovaTask(BaseTask):
         speed: The magnitude of the velocity to be sampled
         cone_angle: The angle in degrees that bounds the velocity cone. 0 deg corresponds to straight line.
 
-        Returns: A list representing the sampled velocity (V_x, V_y, V_z)
+        Returns: A list representing the sampled velocity [vx, vy, vz]
         """
 
-        pass
+        # Convert cone angle to radians
+        cone_angle_rad = np.radians(cone_angle)
+
+        # Sample random spherical direction within the cone
+        theta = np.random.uniform(0, 2*np.pi)
+        phi = np.random.uniform(0, cone_angle_rad)
+
+        # convert the direction to cartesian coordinates and scale to produce velocity
+        vx = speed * np.sin(phi) * np.cos(theta)
+        vy = speed * np.sin(phi) * np.sin(theta)
+        vz = speed * np.cos(phi)
+
+        # return velocity as list
+        v = [vx, vy, vz]
+        return v
 
     def reset(self, env_ids=None):
         """
