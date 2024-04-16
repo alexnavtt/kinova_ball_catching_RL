@@ -17,6 +17,10 @@ from kinova import Kinova
 from omni.isaac.core.utils.prims import get_prim_at_path
 from kinova_view import KinovaView
 from omni.isaac.dynamic_control import _dynamic_control
+from omni.isaac.core.utils.extensions import enable_extension
+enable_extension("omni.replicator.isaac")
+enable_extension("omni.kit.window.viewport")
+import omni.replicator.core as rep
 
 dc = _dynamic_control.acquire_dynamic_control_interface()
 
@@ -105,9 +109,22 @@ class KinovaTask(BaseTask):
 
     def get_kinova(self):
         self._kinova: Kinova = Kinova(prim_path="/World/envs/kinova", name="kinova")
-        # self._sim_config.apply_articulation_settings(
-        #     "Kinova", get_prim_at_path(kinova.prim_path), self._sim_config.parse_actor_config("Kinova")
-        # )
+
+        # Add an invisible depth camera to the robot's wrist
+        self._wrist_cam = rep.create.camera(
+            parent=f"{self._kinova.prim_path}/robotiq_85_base_link",
+            # position = (0.0, -0.05, 0.0), 
+            # look_at=(0.0, 0.0, 10.0), 
+            # parent=f"{prim_path}/robotiq_85_base_link",
+            position=(1.0, 1.0, 3.0),
+            look_at=(1.0, 0.0, 1.0),
+            clipping_range=(0.10, 1000000.0)
+        )
+        
+        rp_wrist = rep.create.render_product(self._wrist_cam, (102, 51))
+        self._depth_camera = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
+        # self._depth_camera.attach(rp_wrist)
+        # rep.orchestrator.step(pause_timeline=False)
 
     def set_initial_camera_params(
         self, camera_position=[5, -7, 3], camera_target=[0, 0, 1]
@@ -125,17 +142,8 @@ class KinovaTask(BaseTask):
         self._gripper_dof_index_1 = self._kinovas.get_dof_index("robotiq_85_left_knuckle_joint")
         self._gripper_dof_index_2 = self._kinovas.get_dof_index("robotiq_85_right_knuckle_joint")
 
-        # randomize all envs
-        # indices = torch.arange(
-        #     self._robots.count, dtype=torch.int64, device=self._device
-        # )
-        # self.reset(indices)
-        #TODO
-        #and set the velocity of the ball
-        sampled_ball_velocity = self.sample_launch_velocity(speed=0.1, cone_axis=[0,1,0], cone_angle=10)
-        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
 
-    def sample_launch_velocity(speed, cone_axis, cone_angle) -> list:
+    def sample_launch_velocity(self, speed, cone_axis, cone_angle) -> list:
         """
         Samples a random launch velocity within a velocity cone defined by a cone axis, cone angle, and speed
 
@@ -195,9 +203,12 @@ class KinovaTask(BaseTask):
         self._kinovas.set_joint_velocities(dof_vel, indices=indices)
 
         # reset configuration of the ball
-        self._ball.set_world_pose([0.5, -1.5, 0.3])
-        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
+        self._ball.set_world_pose([0.5, -3.0, 0.3])
+        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
+        # sampled_ball_velocity = self.sample_launch_velocity(speed=5, cone_axis=[0,0.8660254037844386,0.5], cone_angle=15)
+        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
 
+        self._num_frames = 0
         # bookkeeping
         # self.resets[env_ids] = 0
 
@@ -225,6 +236,8 @@ class KinovaTask(BaseTask):
         indices = torch.arange(
             self._kinovas.count, dtype=torch.int32, device=self._device
         )
+
+        self._num_frames += 1
 
         self._kinovas.apply_action(
             ArticulationAction(
@@ -277,8 +290,8 @@ class KinovaTask(BaseTask):
         right_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_right_finger_tip_link"))
         gripper_pos = 0.5*(np.array(left_finger_pose.p) + np.array(right_finger_pose.p))
 
-        # print(f"Left finger pose: {left_finger_pose} | Right finger pose: {right_finger_pose}")
-        # print(f"Gripper position is {gripper_pos}")
+        gripper_vel = dc.get_rigid_body_linear_velocity(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_base_link"))
+        relative_vel = np.array(gripper_vel) - ball_vel
 
         # Success - whether the ball collided with the gripper
         # d_min   - Minimum distance between the ball and the gripper
@@ -287,7 +300,7 @@ class KinovaTask(BaseTask):
         # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C
         ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
 
-        return (1.0/(ball_gripper_dist + 1.0)) + (ball_gripper_dist < 0.10)
+        return 5.0*(1.0/(ball_gripper_dist + 1.0)) + 1.0*(ball_gripper_dist < 0.10)
 
     def is_done(self) -> None:
         # cart_pos = self.obs[:, 0]
@@ -312,10 +325,10 @@ class KinovaTask(BaseTask):
         resets = torch.where(ball_pos[2] < 0.1, torch.tensor(1), torch.tensor(0))
 
         # reset the robot if the ball is within a 10 cm of the grippers centroid and near stationary
-        combined_condition = (ball_gripper_dist < 0.10) & (torch.norm(ball_vel) < 0.01)
-        resets = torch.where(combined_condition, torch.tensor(1), resets)
+        # combined_condition = (ball_gripper_dist < 0.10) & (torch.norm(ball_vel) < 0.01)
+        # resets = torch.where(combined_condition, torch.tensor(1), resets)
 
         # print(f"Resets: {resets}")
         self.resets = resets
 
-        return resets.item()
+        return resets.item() or self._num_frames > self._max_episode_length
