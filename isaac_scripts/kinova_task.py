@@ -150,15 +150,22 @@ class KinovaTask(BaseTask):
         # Normalize cone axis
         U = np.array(cone_axis) / np.linalg.norm(cone_axis)
 
-        # Convert cone angle to radians
-        b = np.radians(cone_angle)
+        # # Convert cone angle to radians
+        # b = np.radians(cone_angle)
 
-        # Sample a cone angle within the bounds
-        theta = np.random.uniform(0,b)
+        # # Sample a cone angle within the bounds
+        # theta = np.random.uniform(0,b)
 
-        # Compute the unit vector along the angle theta
-        X = (np.linalg.inv(U.T@U)@U.T*np.cos(theta)).T
+        # # Compute the unit vector along the angle theta
+        # X = (np.linalg.inv(U.T@U)@U.T*np.cos(theta)).T
 
+
+        # Randomly rotate about the cone axis
+        theta = np.random.uniform(-b,b)
+        axis_ang_rot_operator_x = Rotation.from_rotvec(theta*np.array(1,0,0))
+        X = axis_ang_rot_operator_x.apply(U)
+
+        # Randomly rotate about x-axis axis
         # Randomly rotate about the cone axis
         phi = np.random.uniform(0,2*math.pi)
         axis_ang_rot_operator = Rotation.from_rotvec(phi*U)
