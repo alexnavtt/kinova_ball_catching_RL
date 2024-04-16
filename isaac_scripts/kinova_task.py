@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 from omni.isaac.core.articulations import ArticulationView
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.tasks.base_task import BaseTask
@@ -157,7 +158,14 @@ class KinovaTask(BaseTask):
 
         # Compute the unit vector along the angle theta
         X = (np.linalg.inv(U.T@U)@U.T*np.cos(theta)).T
-        X = speed*X #scale by given speed
+
+        # Randomly rotate about the cone axis
+        phi = np.random.uniform(0,2*math.pi)
+        axis_ang_rot_operator = Rotation.from_rotvec(phi*U)
+        X = axis_ang_rot_operator.apply(X)
+
+        # Scale by given speed
+        X = speed*X
 
         return X
 
