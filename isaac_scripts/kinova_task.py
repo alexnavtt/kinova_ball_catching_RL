@@ -131,35 +131,35 @@ class KinovaTask(BaseTask):
         # self.reset(indices)
         #TODO
         #and set the velocity of the ball
-        sampled_ball_velocity = self.sample_launch_velocity(speed=0.1,cone_angle=10)
+        sampled_ball_velocity = self.sample_launch_velocity(speed=0.1, cone_axis=[0,1,0], cone_angle=10)
         dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
 
-    def sample_launch_velocity(speed, cone_angle) -> list:
+    def sample_launch_velocity(speed, cone_axis, cone_angle) -> list:
         """
-        Samples a random launch velocity within a velocity cone defined by a cone angle and speed
+        Samples a random launch velocity within a velocity cone defined by a cone axis, cone angle, and speed
 
         Args:
         speed: The magnitude of the velocity to be sampled
+        cone_axis: A list representing the direction vector of the cone axis
         cone_angle: The angle in degrees that bounds the velocity cone. 0 deg corresponds to straight line.
 
         Returns: A list representing the sampled velocity [vx, vy, vz]
         """
 
+        # Normalize cone axis
+        U = np.array(cone_axis) / np.linalg.norm(cone_axis)
+
         # Convert cone angle to radians
-        cone_angle_rad = np.radians(cone_angle)
+        b = np.radians(cone_angle)
 
-        # Sample random spherical direction within the cone
-        theta = np.random.uniform(0, 2*np.pi)
-        phi = np.random.uniform(0, cone_angle_rad)
+        # Sample a cone angle within the bounds
+        theta = np.random.uniform(0,b)
 
-        # convert the direction to cartesian coordinates and scale to produce velocity
-        vx = speed * np.sin(phi) * np.cos(theta)
-        vy = speed * np.sin(phi) * np.sin(theta)
-        vz = speed * np.cos(phi)
+        # Compute the unit vector along the angle theta
+        X = (np.linalg.inv(U.T@U)@U.T*np.cos(theta)).T
+        X = speed*X #scale by given speed
 
-        # return velocity as list
-        v = [vx, vy, vz]
-        return v
+        return X
 
     def reset(self, env_ids=None):
         """
