@@ -27,13 +27,20 @@ dc = _dynamic_control.acquire_dynamic_control_interface()
 class KinovaTask(BaseTask):
     def __init__(self, name, offset=None):
         # self.update_config(sim_config)
-        self._max_episode_length = 500
+        self._max_episode_length = 200
 
         # Task-specific parameters (fill in as you need them)
         self._robot_lower_joint_limits  = np.deg2rad([-180.0, -128.9, -180.0, -147.8, -180.0, -120.3, -180.0], dtype=np.float32)
         self._robot_upper_joint_limits  = -1.0 * self._robot_lower_joint_limits
         self._gripper_lower_joint_limit = np.deg2rad([ 0.0], dtype=np.float32)
         self._gripper_upper_joint_limit = np.deg2rad([46.0], dtype=np.float32)
+
+        # Set the reward function weights
+        self._weights = {
+            "min_dist"  : 2.0,
+            "collisions": 1.0,
+            "rel_vel"   : 2.0
+        }
 
         # Values used for defining RL buffers (TODO: Image input)
         self._num_observations = 14 # 7 robot joint states, 1 gripper joint state and 6 ball states
@@ -92,12 +99,13 @@ class KinovaTask(BaseTask):
             scene.add(self._kinovas)
 
             # Add and launch the ball (this should maybe be moved to post_reset?)
+            ball_radius = 0.03
             self._ball = scene.add(
                 DynamicSphere(
                     prim_path="/World/random_sphere",
                     name="tennis_ball",
                     position=np.array([0.3, 0.3, 0.3]),
-                    scale=np.array([0.0515, 0.0515, 0.0515]),
+                    scale=np.ones(3)*ball_radius,
                     color=np.array([0, 1.0, 0]),
                 )
             )
@@ -159,18 +167,11 @@ class KinovaTask(BaseTask):
         U = np.array(cone_axis) / np.linalg.norm(cone_axis)
 
         # # Convert cone angle to radians
-        # b = np.radians(cone_angle)
-
-        # # Sample a cone angle within the bounds
-        # theta = np.random.uniform(0,b)
-
-        # # Compute the unit vector along the angle theta
-        # X = (np.linalg.inv(U.T@U)@U.T*np.cos(theta)).T
-
+        b = np.radians(cone_angle)
 
         # Randomly rotate about the cone axis
         theta = np.random.uniform(-b,b)
-        axis_ang_rot_operator_x = Rotation.from_rotvec(theta*np.array(1,0,0))
+        axis_ang_rot_operator_x = Rotation.from_rotvec(theta*np.array([1,0,0]))
         X = axis_ang_rot_operator_x.apply(U)
 
         # Randomly rotate about x-axis axis
@@ -203,10 +204,10 @@ class KinovaTask(BaseTask):
         self._kinovas.set_joint_velocities(dof_vel, indices=indices)
 
         # reset configuration of the ball
-        self._ball.set_world_pose([0.5, -3.0, 0.3])
-        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
-        # sampled_ball_velocity = self.sample_launch_velocity(speed=5, cone_axis=[0,0.8660254037844386,0.5], cone_angle=15)
-        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
+        self._ball.set_world_pose([0.5, -2.0, 0.3])
+        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
+        sampled_ball_velocity = self.sample_launch_velocity(speed=5, cone_axis=[0,0.8660254037844386,0.5], cone_angle=15)
+        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
 
         self._num_frames = 0
         # bookkeeping
@@ -228,6 +229,8 @@ class KinovaTask(BaseTask):
 
         full_dof_actions = torch.zeros(13, dtype=torch.float32)
         full_dof_actions[:7] = joint_state_actions[:7]
+        # full_dof_actions = self._kinovas.get_joint_positions(indices=[0])[0]
+        # joint_state_actions[-1] = math.radians(46)
         full_dof_actions[self._gripper_dof_index_1] = joint_state_actions[-1]
         full_dof_actions[self._gripper_dof_index_2] = -1.0 * joint_state_actions[-1]
         # print(f"{full_dof_actions}")
@@ -300,7 +303,7 @@ class KinovaTask(BaseTask):
         # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C
         ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
 
-        return 5.0*(1.0/(ball_gripper_dist + 1.0)) + 1.0*(ball_gripper_dist < 0.10)
+        return self._weights["min_dist"]*(1.0/(ball_gripper_dist + 1.0)) + self._weights["collisions"]*(ball_gripper_dist < 0.10) + self._weights["rel_vel"]*(np.linalg.norm(relative_vel))
 
     def is_done(self) -> None:
         # cart_pos = self.obs[:, 0]
