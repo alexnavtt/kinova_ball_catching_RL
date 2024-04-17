@@ -19,7 +19,8 @@ class Kinova(Robot):
         self,
         prim_path: str,
         name: Optional[str] = "kinova",
-        usd_path: Optional[str] = "/home/alex/workspaces/cs395T/src/kinova_ball_catching_RL/models/kinova_closed_loop.usd",
+        # usd_path: Optional[str] = "/home/alex/workspaces/cs395T/src/kinova_ball_catching_RL/models/kinova_closed_loop.usd", # Alex
+        usd_path: Optional[str] = "/home/crasun/isaacsim_ws/abc_ws/kinova_ball_catching_RL/models/kinova_closed_loop.usd", # Crasun
         translation: Optional[torch.tensor] = None,
         orientation: Optional[torch.tensor] = None,
     ) -> None:
@@ -67,7 +68,6 @@ class Kinova(Robot):
 
     def set_kinova_properties(self, stage, prim):
         for link_prim in prim.GetChildren():
-            if link_prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI): 
+            if link_prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI):
                 rb = PhysxSchema.PhysxRigidBodyAPI.Get(stage, link_prim.GetPrimPath())
                 rb.GetDisableGravityAttr().Set(True)
-
