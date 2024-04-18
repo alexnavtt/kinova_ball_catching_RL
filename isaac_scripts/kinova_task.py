@@ -1,4 +1,5 @@
 import math
+from scipy.spatial.transform import Rotation
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -39,7 +40,8 @@ class KinovaTask(BaseTask):
         self._weights = {
             "min_dist"  : 2.0,
             "collisions": 1.0,
-            "rel_vel"   : 2.0
+            "rel_vel"   : 0.5,
+            "alignment" : 1.0
         }
 
         # Values used for defining RL buffers (TODO: Image input)
@@ -281,6 +283,11 @@ class KinovaTask(BaseTask):
 
         left_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_left_finger_tip_link"))
         right_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_right_finger_tip_link"))
+        end_effector_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/end_effector_link"))
+        end_effector_z_axis = Rotation.from_quat(end_effector_pose.r).as_matrix()[:3,2]
+        ball_vel_axis = ball_vel / np.linalg.norm(ball_vel)
+        alignment = -1.0*np.dot(end_effector_z_axis, ball_vel_axis)
+
         gripper_pos = 0.5*(np.array(left_finger_pose.p) + np.array(right_finger_pose.p))
 
         gripper_vel = dc.get_rigid_body_linear_velocity(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_base_link"))
@@ -293,7 +300,13 @@ class KinovaTask(BaseTask):
         # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C
         ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
 
-        return self._weights["min_dist"]*(1.0/(ball_gripper_dist + 1.0)) + self._weights["collisions"]*(ball_gripper_dist < 0.10) + self._weights["rel_vel"]*(np.linalg.norm(relative_vel))
+        reward = 0
+        # reward += self._weights["min_dist"  ]*ball_gripper_dist*-1.0
+        reward += self._weights["min_dist"  ]*(1.0/(ball_gripper_dist + 1.0))
+        reward += self._weights["collisions"]*(ball_gripper_dist < 0.10)
+        reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
+        reward += self._weights["alignment" ]*alignment
+        return reward
 
     def is_done(self) -> None:
         # cart_pos = self.obs[:, 0]
