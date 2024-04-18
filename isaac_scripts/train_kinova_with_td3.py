@@ -13,7 +13,36 @@ from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckA
 n_actions = env.action_space.shape[-1]
 action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
 
-model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
+params = {
+    "policy": 'MlpPolicy',
+    "action_noise": action_noise,
+    "gamma": 0.98,
+    "buffer_size": 200000,
+    "learning_starts": 10000,
+    "gradient_steps": 1,
+    "train_freq": 1,
+    "learning_rate": 1e-3,
+    "policy_kwargs": {"net_arch": [400, 300]},
+    "tensorboard_log": './kinova_tensorboard',
+    "verbose": 1
+}
+
+
+model = TD3(
+    params["policy"],
+    env,
+    action_noise=params["action_noise"],
+    gamma=params["gamma"],
+    buffer_size=params["buffer_size"],
+    learning_starts=params["learning_starts"],
+    gradient_steps=params["gradient_steps"],
+    train_freq=params["train_freq"],
+    learning_rate=params["learning_rate"],
+    verbose=params["verbose"],
+    tensorboard_log=params["tensorboard_log"],
+    policy_kwargs=params["policy_kwargs"]
+)
+
 model.learn(total_timesteps=10000, log_interval=10)
 model.save("kinova")
 
