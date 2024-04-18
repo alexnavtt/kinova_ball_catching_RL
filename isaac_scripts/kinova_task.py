@@ -67,6 +67,9 @@ class KinovaTask(BaseTask):
             np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit, +1.0*np.ones(6,dtype=np.float32)*np.Inf))
         )
 
+        # Record the reward over time for plotting 
+        self._reward_over_time = []
+
         # trigger __init__ of parent class
         BaseTask.__init__(self, name=name, offset=offset)
 
@@ -308,6 +311,8 @@ class KinovaTask(BaseTask):
         reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
         reward += self._weights["alignment" ]*alignment
         reward += self._weights["catch" ]*(np.linalg.norm(ball_vel)<0.1 and ball_pos[2]>0.1)
+
+        self._reward_over_time.append(reward)
         return reward
 
     def is_done(self) -> None:
