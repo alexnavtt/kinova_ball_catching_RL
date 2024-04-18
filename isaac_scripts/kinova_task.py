@@ -116,23 +116,13 @@ class KinovaTask(BaseTask):
             return
 
     def get_kinova(self):
-        self._kinova: Kinova = Kinova(prim_path="/World/envs/kinova", name="kinova")
+        prim_path = "/World/envs/kinova"
+        self._kinova: Kinova = Kinova(prim_path=prim_path, name="kinova")
 
         # Add an invisible depth camera to the robot's wrist
-        self._wrist_cam = rep.create.camera(
-            parent=f"{self._kinova.prim_path}/robotiq_85_base_link",
-            # position = (0.0, -0.05, 0.0), 
-            # look_at=(0.0, 0.0, 10.0), 
-            # parent=f"{prim_path}/robotiq_85_base_link",
-            position=(1.0, 1.0, 3.0),
-            look_at=(1.0, 0.0, 1.0),
-            clipping_range=(0.10, 1000000.0)
-        )
-        
-        rp_wrist = rep.create.render_product(self._wrist_cam, (102, 51))
+        rp_wrist = rep.create.render_product(f"{prim_path}/end_effector_link/Camera_Xform/WristCam", (102, 51))
         self._depth_camera = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
-        # self._depth_camera.attach(rp_wrist)
-        # rep.orchestrator.step(pause_timeline=False)
+        self._depth_camera.attach(rp_wrist)
 
     def set_initial_camera_params(
         self, camera_position=[5, -7, 3], camera_target=[0, 0, 1]

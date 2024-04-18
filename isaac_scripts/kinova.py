@@ -67,6 +67,14 @@ class Kinova(Robot):
 
         ]
 
+        PhysxSchema.PhysxJointAPI(get_prim_at_path(f"{self.prim_path}/robotiq_85_base_link/robotiq_85_left_knuckle_joint")).CreateMaxJointVelocityAttr().Set(
+            100.0
+        )
+
+        PhysxSchema.PhysxJointAPI(get_prim_at_path(f"{self.prim_path}/robotiq_85_base_link/robotiq_85_right_knuckle_joint")).CreateMaxJointVelocityAttr().Set(
+            100.0
+        )
+
     def set_kinova_properties(self, stage, prim):
         for link_prim in prim.GetChildren():
             if link_prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI):
