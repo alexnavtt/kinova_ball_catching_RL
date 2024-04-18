@@ -42,7 +42,7 @@ class KinovaTask(BaseTask):
             "collisions": 3.0,
             "rel_vel"   : 2.0,
             "alignment" : 3.0,
-            "catch" : 5.0
+            "catch"     : 5.0
         }
 
         # Values used for defining RL buffers (TODO: Image input)
