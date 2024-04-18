@@ -39,9 +39,10 @@ class KinovaTask(BaseTask):
         # Set the reward function weights
         self._weights = {
             "min_dist"  : 2.0,
-            "collisions": 1.0,
-            "rel_vel"   : 0.5,
-            "alignment" : 1.0
+            "collisions": 3.0,
+            "rel_vel"   : 2.0,
+            "alignment" : 3.0,
+            "catch" : 5.0
         }
 
         # Values used for defining RL buffers (TODO: Image input)
@@ -306,6 +307,7 @@ class KinovaTask(BaseTask):
         reward += self._weights["collisions"]*(ball_gripper_dist < 0.10)
         reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
         reward += self._weights["alignment" ]*alignment
+        reward += self._weights["catch" ]*(np.linalg.norm(ball_vel)<0.1 and ball_pos[2]>0.1)
         return reward
 
     def is_done(self) -> None:
