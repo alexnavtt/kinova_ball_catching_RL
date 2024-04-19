@@ -1,3 +1,5 @@
+from matplotlib import pyplot as plt
+
 import numpy as np
 from omni.isaac.gym.vec_env import VecEnvBase
 env = VecEnvBase(headless=True)
@@ -43,7 +45,10 @@ model = TD3(
     policy_kwargs=params["policy_kwargs"]
 )
 
-model.learn(total_timesteps=10000, log_interval=10)
+model.learn(total_timesteps=100000, log_interval=10)
 model.save("kinova")
+
+plt.plot(task._reward_over_time)
+plt.savefig("reward.png")
 
 env.close()
