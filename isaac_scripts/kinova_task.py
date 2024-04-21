@@ -388,6 +388,7 @@ class KinovaTask(RLTask):
 
     def is_done(self):
         self.reset_buf = torch.where(self.ball_height < 0.1, torch.ones_like(self.reset_buf), self.reset_buf)
+        self.reset_buf = torch.where(self.progress_buf >= self._max_episode_length-1, torch.ones_like(self.reset_buf), self.reset_buf)
 
     # def is_done(self) -> None:
     #     # cart_pos = self.obs[:, 0]
