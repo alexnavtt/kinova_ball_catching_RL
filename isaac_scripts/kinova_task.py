@@ -342,6 +342,14 @@ class KinovaTask(RLTask):
         X = speed*X
 
         return X
+    
+    def calculate_metrics(self) -> dict:
+        ball_dist_reward = 1.0/(0.025 + self.ball_dist)
+        self.rew_buf[:] = ball_dist_reward
+
+    def is_done(self):
+        self.reset_buf = torch.where(self.ball_height < 0.1, torch.ones_like(self.reset_buf), self.reset_buf)
+        self.reset_buf = torch.where(self.progress_buf >= self._max_episode_length-1, torch.ones_like(self.reset_buf), self.reset_buf)
 
     # def calculate_metrics(self) -> float:
     #     # use states from the observation buffer to compute reward
@@ -381,42 +389,3 @@ class KinovaTask(RLTask):
 
     #     self._reward_over_time.append(reward)
     #     return reward
-
-    def calculate_metrics(self) -> dict:
-        ball_dist_reward = 1.0/(0.025 + self.ball_dist)
-        self.rew_buf[:] = ball_dist_reward
-
-    def is_done(self):
-        self.reset_buf = torch.where(self.ball_height < 0.1, torch.ones_like(self.reset_buf), self.reset_buf)
-        self.reset_buf = torch.where(self.progress_buf >= self._max_episode_length-1, torch.ones_like(self.reset_buf), self.reset_buf)
-
-    # def is_done(self) -> None:
-    #     # cart_pos = self.obs[:, 0]
-    #     # pole_pos = self.obs[:, 2]
-    #     ball_pos = self.obs[8:11].clone().detach()  # Using clone().detach() as recommended
-    #     ball_vel = self.obs[11:].clone().detach()  # Same here
-    #     # ball_pos = torch.tensor(self.obs[8:11])  # ensure get_observations has ball_pos set in this column
-    #     # ball_vel = torch.tensor(self.obs[11:])
-    #     left_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_left_finger_tip_link"))
-    #     right_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_right_finger_tip_link"))
-    #     # gripper_pos = torch.tensor(0.5*(np.array(left_finger_pose.p) + np.array(right_finger_pose.p)))
-    #     gripper_pos = torch.tensor(0.5 * (np.array(left_finger_pose.p) + np.array(right_finger_pose.p)), dtype=torch.float64)
-    #     ball_gripper_dist = torch.norm(gripper_pos - ball_pos)
-
-
-
-    #     # print(f"is_done | ball_pos: {ball_pos} | height: {ball_pos[2]} | ball_vel_norm: {torch.norm(ball_vel)}")
-
-    #     # TODO: Handle if the robot catches the ball... Done
-
-    #     # If centroid of ball is below 10 cm, end episode
-    #     resets = torch.where(ball_pos[2] < 0.1, torch.tensor(1), torch.tensor(0))
-
-    #     # reset the robot if the ball is within a 10 cm of the grippers centroid and near stationary
-    #     # combined_condition = (ball_gripper_dist < 0.10) & (torch.norm(ball_vel) < 0.01)
-    #     # resets = torch.where(combined_condition, torch.tensor(1), resets)
-
-    #     # print(f"Resets: {resets}")
-    #     self.resets = resets
-
-        # return resets.item() or self._num_frames > self._max_episode_length
