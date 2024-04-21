@@ -5,12 +5,15 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from omni.isaac.core.articulations import ArticulationView
 from omni.isaac.core.utils.types import ArticulationAction
-from omni.isaac.core.tasks.base_task import BaseTask
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.prims import create_prim
-from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
 from omni.isaac.core.utils.viewports import set_camera_view
 from omni.isaac.core.objects import DynamicSphere
+from omni.isaac.core.prims.rigid_prim_view import RigidPrimView
+
+from omniisaacgymenvs.tasks.base.rl_task import RLTask
+
 import os
 import torch
 from gymnasium import spaces
@@ -25,10 +28,22 @@ import omni.replicator.core as rep
 
 dc = _dynamic_control.acquire_dynamic_control_interface()
 
-class KinovaTask(BaseTask):
-    def __init__(self, name, offset=None):
-        # self.update_config(sim_config)
-        self._max_episode_length = 200
+class KinovaTask(RLTask):
+    def __init__(
+            self, 
+            name, 
+            sim_config,
+            env,
+            offset=None
+    ) -> None:
+        
+        # Simulation and training parameters
+        self.dt = 1/60
+        self._max_episode_length = 300
+        self._num_observations = 14     # 7 robot joint states, 1 gripper joint state and 6 ball states
+        self._num_actions = 8           # 7 arm joint actions and 1 gripper joint action
+        self._device = "cpu"
+        self._num_envs = 2
 
         # Task-specific parameters (fill in as you need them)
         self._robot_lower_joint_limits  = np.deg2rad([-180.0, -128.9, -180.0, -147.8, -180.0, -120.3, -180.0], dtype=np.float32)
@@ -39,17 +54,11 @@ class KinovaTask(BaseTask):
         # Set the reward function weights
         self._weights = {
             "min_dist"  : 2.0,
-            "collisions": 3.0,
+            "collisions": 10.0,
             "rel_vel"   : 2.0,
-            "alignment" : 3.0,
-            "catch"     : 5.0
+            "alignment" : 1.0,
+            "catch"     : 50.0
         }
-
-        # Values used for defining RL buffers (TODO: Image input)
-        self._num_observations = 14 # 7 robot joint states, 1 gripper joint state and 6 ball states
-        self._num_actions = 8 # 7 arm joint actions and 1 gripper joint action
-        self._device = "cpu"
-        self.num_envs = 1
 
         # A few class buffers to store RL-related states
         self.obs = torch.zeros((self.num_envs, self._num_observations))
@@ -71,73 +80,191 @@ class KinovaTask(BaseTask):
         self._reward_over_time = []
 
         # trigger __init__ of parent class
-        BaseTask.__init__(self, name=name, offset=offset)
-
-    def update_config(self, sim_config):
-        # extract task config from main config dictionary
-        self._sim_config = sim_config
-        self._cfg = sim_config.config
-        self._task_cfg = sim_config.task_config
-
-        # parse task config parameters
-        self._num_envs = self._task_cfg["env"]["numEnvs"]
-        self._env_spacing = self._task_cfg["env"]["envSpacing"]
-        self._kinova_positions = torch.tensor([0.0, 0.0, 2.0])
-
-        # reset and actions related variables
-        self._reset_dist = self._task_cfg["env"]["resetDist"]
-        self._max_push_effort = self._task_cfg["env"]["maxEffort"]
+        RLTask.__init__(self, name, env)
 
     def set_up_scene(self, scene) -> None:
+            self.stage = get_current_stage()
+
             # first create a single environment
             self.get_kinova()
+            self.get_ball()
 
             # call the parent class to clone the single environment
-            super().set_up_scene(scene)
+            super().set_up_scene(scene, replicate_physics=False)
 
             # construct an ArticulationView object to hold our collection of environments
             self._kinovas = ArticulationView(
-                prim_paths_expr="/World/envs/kinova", name="kinova_view"
+                prim_paths_expr=f"{self.default_zero_env_path}/.*/kinova", 
+                name="kinova_view",
+                reset_xform_properties=False
+            )
+
+            self._balls = RigidPrimView(
+                prim_paths_expr=f"{self.default_zero_env_path}/.*/ball", 
+                name="ball_view",
+                reset_xform_properties=False
+            )
+
+            self._lfingers = RigidPrimView(
+                prim_paths_expr=f"{self.default_zero_env_path}/.*/kinova/robotiq_85_left_finger_tip_link",
+                name = "left_fingers_view",
+                reset_xform_properties=False
+            )
+
+            self._rfingers = RigidPrimView(
+                prim_paths_expr=f"{self.default_zero_env_path}/.*/kinova/robotiq_85_right_finger_tip_link",
+                name = "left_fingers_view",
+                reset_xform_properties=False
             )
 
             # register the ArticulationView object to the world, so that it can be initialized
-            scene.add_default_ground_plane()
             scene.add(self._kinovas)
-
-            # Add and launch the ball (this should maybe be moved to post_reset?)
-            ball_radius = 0.03
-            self._ball = scene.add(
-                DynamicSphere(
-                    prim_path="/World/random_sphere",
-                    name="tennis_ball",
-                    position=np.array([0.3, 0.3, 0.3]),
-                    scale=np.ones(3)*ball_radius,
-                    color=np.array([0, 1.0, 0]),
-                )
-            )
+            scene.add(self._lfingers)
+            scene.add(self._rfingers)
+            scene.add(self._balls)
 
             # set default camera viewport position and target
             self.set_initial_camera_params()
 
             return
+    
+    def initialize_views(self, scene):
+        super().initialize_views(scene)
+        if scene.object_exists("kinova_view"):
+            scene.remove_object("kinova_view", registry_only=True)
+
+        # TODO: Try removing this line in set_up_scene and see if it works
+        self._kinovas = ArticulationView(
+            prim_paths_expr=f"{self.default_zero_env_path}/.*/kinova", name="kinova_view"
+        )
+        scene.add(self._kinovas)
 
     def get_kinova(self):
-        prim_path = "/World/envs/kinova"
-        self._kinova: Kinova = Kinova(prim_path=prim_path, name="kinova")
+        self._kinova: Kinova = Kinova(
+            prim_path=f"{self.default_zero_env_path}/kinova", 
+            name="kinova"
+        )
 
-        # Add an invisible depth camera to the robot's wrist
-        rp_wrist = rep.create.render_product(f"{prim_path}/end_effector_link/Camera_Xform/WristCam", (102, 51))
-        self._depth_camera = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
-        self._depth_camera.attach(rp_wrist)
+        # Add an invisible depth camera to the robot's wrist (Maybe later)
+        # rp_wrist = rep.create.render_product(f"{prim_path}/end_effector_link/Camera_Xform/WristCam", (102, 51))
+        # self._depth_camera = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
+        # self._depth_camera.attach(rp_wrist)
 
-    def set_initial_camera_params(
-        self, camera_position=[5, -7, 3], camera_target=[0, 0, 1]
-    ):
+    def get_ball(self):
+        # Add and launch the ball (this should maybe be moved to post_reset?)
+        ball_radius = 0.03
+        self._ball = add_reference_to_stage(
+            DynamicSphere(
+                prim_path=f"{self.default_zero_env_path}/ball",
+                name="tennis_ball",
+                position=np.array([0.3, 0.3, 0.3]),
+                scale=np.ones(3)*ball_radius,
+                color=np.array([0, 1.0, 0]),
+            )
+        )
+
+    def set_initial_camera_params(self):
+        camera_position = [5, -7, 3]
+        camera_target = [0, 0, 1]
         set_camera_view(
             eye=camera_position,
             target=camera_target,
             camera_prim_path="/OmniverseKit_Persp",
-        )  # need to test this in GUI
+        ) 
+
+    def get_observations(self):
+        # Get the robot and ball state from the simulation
+        dof_pos  = self._kinovas.get_joint_positions(clone=False)
+        ball_vel = self._balls.get_linear_velocities(clone=False)
+        ball_pos, _ = self._balls.get_world_poses(clone=False) - self._env_pos
+
+        # Get the end effector position
+        lfinger_pos, _ = self._lfingers.get_world_poses()
+        rfinger_pos, _ = self._rfingers.get_world_poses()
+        end_effector_pos = (lfinger_pos + rfinger_pos)/2 - self._env_pos
+
+        # Extract the information that we need for the model
+        joint_pos   = dof_pos[:, 0:7]
+        gripper_pos = dof_pos[:, self._gripper_dof_index_1],
+
+        # Record the data that we want to use in the reward function
+
+        self.obs_buf = torch.cat(
+            (
+                joint_pos,
+                gripper_pos,
+                ball_pos,
+                ball_vel
+            ),
+            dim=-1
+        )
+        
+        observations = {
+            self._kinovas.name: {
+                "obs_buf": self.obs_buf
+            }
+        }
+        return observations
+    
+    def pre_physics_step(self, actions: torch.Tensor) -> None:
+        """
+        This method will be called from VecEnvBase before each simulation step, and will pass in actions from the RL policy as an argument
+        """
+        if not self.world.is_playing():
+            return
+
+        # Check to see if any environments need resetting
+        reset_env_ids = self.resets.nonzero(as_tuple=False).squeeze(-1)
+        if len(reset_env_ids) > 0:
+            self.reset_idx(reset_env_ids)
+
+        # actions = torch.tensor(actions)
+        joint_state_actions = actions.clone().to(self._device)
+        # print(f"Joint state actions: {joint_state_actions}")
+
+        full_dof_actions = torch.zeros(13, dtype=torch.float32)
+        full_dof_actions[:7] = joint_state_actions[:7]
+        # full_dof_actions = self._kinovas.get_joint_positions(indices=[0])[0]
+        # joint_state_actions[-1] = math.radians(46)
+        full_dof_actions[self._gripper_dof_index_1] = joint_state_actions[-1]
+        full_dof_actions[self._gripper_dof_index_2] = -1.0 * joint_state_actions[-1]
+
+        indices = torch.arange(self._kinovas.count, dtype=torch.int32, device=self._device)
+        self._kinovas.set_joint_position_targets(full_dof_actions, indices=indices)
+
+    def reset_idx(self, env_ids: torch.Tensor):
+        # Set up reset bookkeeping
+        indicies = env_ids.to(dtype=torch.int32)
+        num_indices = len(indicies)
+
+        default_pos = torch.tensor([0, 0.6, 0, 1.8, 1.5, -1.5, -0.9, 0, 0, 0, 0, 0, 0], device=self._device)
+        dof_pos = torch.zeros((num_indices, self._kinovas.num_dof), device=self._device)
+        dof_vel = torch.zeros((num_indices, self._kinovas.num_dof), device=self._device)
+        dof_pos[:, :] = default_pos
+
+        # Reset the robots to their default positions and zero velocity
+        self._kinovas.set_joint_positions(dof_pos, indices=indicies)
+        self._kinovas.set_joint_position_targets(dof_pos, indices=indicies)
+        self._kinovas.set_joint_velocities(dof_vel, indices=indicies)
+
+        # Set the balls to their default positions
+        ball_positions = torch.Tensor([-0.5, -2.0, 0.3], device=self._device).repeat((num_indices, 1)) + self._env_pos.index_select(index=indicies, dim=-1)
+        self._balls.set_world_poses(positions=ball_positions, indices=indicies)
+
+        # Sample random velocities for each reset ball
+        ball_vels = torch.zeros((num_indices, 3), device=self.device)
+        for i in range(num_indices):
+            ball_vels[i, :] = self.sample_launch_velocity(
+                speed=5, 
+                cone_axis=[0,0.8660254037844386,0.5], 
+                cone_angle=15
+            )
+            self._ball.set_world_pose([0.5, -2.0, 0.3])
+        self._balls.set_linear_velocities(ball_vels, indices=indicies)
+
+        # More bookkeeping
+        self.reset_buf[env_ids] = 0
+        self.progress_buf[env_ids] = 0
 
     def post_reset(self):
         """
@@ -146,6 +273,9 @@ class KinovaTask(BaseTask):
         self._gripper_dof_index_1 = self._kinovas.get_dof_index("robotiq_85_left_knuckle_joint")
         self._gripper_dof_index_2 = self._kinovas.get_dof_index("robotiq_85_right_knuckle_joint")
 
+        # Reset all environments
+        indices = torch.arange(self._num_envs, dtype=torch.int64, device=self._device)
+        self.reset_idx(indices)
 
     def sample_launch_velocity(self, speed, cone_axis, cone_angle) -> list:
         """
@@ -181,102 +311,6 @@ class KinovaTask(BaseTask):
 
         return X
 
-    def reset(self, env_ids=None):
-        """
-        This method is used to set our environment into an initial state for starting a new training episode
-        """
-        if env_ids is None:
-            env_ids = torch.arange(self.num_envs, device=self._device)
-        num_resets = len(env_ids)
-
-        # zero DOF positions and velocities
-        dof_pos = torch.tensor(np.array([0, 2, 0, 6, 5, -5, -3, 0, 0, 0, 0, 0, 0], dtype=np.float32)*0.3, device=self._device)
-        # dof_pos = torch.zeros((num_resets, self._kinovas.num_dof), device=self._device)
-        dof_vel = torch.zeros((num_resets, self._kinovas.num_dof), device=self._device)
-
-        # reset configuration of the robot
-        indices = [0]
-        self._kinovas.set_joint_positions(dof_pos, indices=indices)
-        self._kinovas.set_joint_velocities(dof_vel, indices=indices)
-
-        # reset configuration of the ball
-        self._ball.set_world_pose([0.5, -2.0, 0.3])
-        # dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), [0.0, 5.0, 3.0])
-        sampled_ball_velocity = self.sample_launch_velocity(speed=5, cone_axis=[0,0.8660254037844386,0.5], cone_angle=15)
-        dc.set_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path), sampled_ball_velocity)
-
-        self._num_frames = 0
-        # bookkeeping
-        # self.resets[env_ids] = 0
-
-
-    def pre_physics_step(self, actions) -> None:
-        """
-        This method will be called from VecEnvBase before each simulation step, and will pass in actions from the RL policy as an argument
-        """
-        # Check to see if any environments need resetting
-        reset_env_ids = self.resets.nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            self.reset(reset_env_ids)
-
-        # actions = torch.tensor(actions)
-        joint_state_actions = torch.tensor(actions)
-        # print(f"Joint state actions: {joint_state_actions}")
-
-        full_dof_actions = torch.zeros(13, dtype=torch.float32)
-        full_dof_actions[:7] = joint_state_actions[:7]
-        # full_dof_actions = self._kinovas.get_joint_positions(indices=[0])[0]
-        # joint_state_actions[-1] = math.radians(46)
-        full_dof_actions[self._gripper_dof_index_1] = joint_state_actions[-1]
-        full_dof_actions[self._gripper_dof_index_2] = -1.0 * joint_state_actions[-1]
-        # print(f"{full_dof_actions}")
-
-        # indices = torch.arange(self._cartpoles.count, dtype=torch.int32, device=self._device)
-        indices = torch.arange(
-            self._kinovas.count, dtype=torch.int32, device=self._device
-        )
-
-        self._num_frames += 1
-
-        self._kinovas.apply_action(
-            ArticulationAction(
-                joint_positions=full_dof_actions,
-            ),
-            indices=indices
-        )
-        # References
-        # https://docs.omniverse.nvidia.com/isaacsim/latest/isaac_gym_tutorials/tutorial_gym_isaac_gym_new_oige_example.html#isaac-sim-app-tutorial-gym-omni-isaac-gym-new-example
-        # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.manipulators/docs/index.html
-
-    def get_observations(self):
-        # Get the robot and ball state from the simulation
-        dof_pos  = self._kinovas.get_joint_positions()
-        dof_ball = self._ball.get_world_pose()
-        vel_ball = dc.get_rigid_body_linear_velocity(dc.get_rigid_body(self._ball.prim_path))
-
-        # print(f"DoF ball: {dof_ball}\nDoF pos: {dof_pos}\nVel ball: {vel_ball}")
-
-        # Extract the information that we need for the model
-        joint_pos   = dof_pos[0, 0:7]
-        gripper_pos = dof_pos[0, self._gripper_dof_index_1],
-        ball_pos    = dof_ball[0][0:3]
-        ball_vel    = vel_ball
-        #TODO include ball velocity
-
-        # print(f"Ball pos: {ball_pos}\nJoint pos: {joint_pos}\nGripper pos: {gripper_pos}\nBall vel: {ball_vel}")
-
-        # # populate the observations buffer                               #|
-        # self.obs_buf[:, 0] = joint_pos                                   #|I added these to work with the calculate_metrics method
-        # self.obs_buf[:, 1] = gripper_pos                                 #|to reflect what the tutorials do - Caleb
-        # self.obs_buf[:, 2] = ball_pos                                    #|
-        # # construct the observations dictionary and return               #|
-        # observations = {self._cartpoles.name: {"obs_buf": self.obs_buf}} #|
-
-        obs = np.concatenate((joint_pos, gripper_pos, ball_pos, ball_vel))
-        self.obs = torch.tensor(obs)
-        # print(f"Self.obs: {self.obs}")
-        return self.obs
-
     def calculate_metrics(self) -> float:
         # use states from the observation buffer to compute reward
         # TODO: Alter this for multiple robots
@@ -307,10 +341,11 @@ class KinovaTask(BaseTask):
         reward = 0
         # reward += self._weights["min_dist"  ]*ball_gripper_dist*-1.0
         reward += self._weights["min_dist"  ]*(1.0/(ball_gripper_dist + 1.0))
+        reward *= self._weights["alignment" ]*alignment
+        # reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
         reward += self._weights["collisions"]*(ball_gripper_dist < 0.10)
-        reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
-        reward += self._weights["alignment" ]*alignment
         reward += self._weights["catch" ]*(np.linalg.norm(ball_vel)<0.1 and ball_pos[2]>0.1)
+        reward += 1/(1 + gripper_angle)
 
         self._reward_over_time.append(reward)
         return reward
