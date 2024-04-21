@@ -218,8 +218,8 @@ class KinovaTask(RLTask):
         gripper_pos = dof_pos[:, self._gripper_dof_index_1].unsqueeze(1)
 
         # Record the data that we want to use in the reward and is_done functions
-        self.ball_dist  = torch.norm(ball_pos - end_effector_pos, dim=1)
-        self.ball_speed = torch.norm(ball_vel, dim=1)
+        self.ball_dist  = torch.norm(ball_pos - end_effector_pos, p=2, dim=-1)
+        self.ball_speed = torch.norm(ball_vel, p=2, dim=-1)
         self.ball_height = ball_pos[:, 2]
 
         self.obs_buf = torch.cat(
@@ -383,7 +383,7 @@ class KinovaTask(RLTask):
     #     return reward
 
     def calculate_metrics(self) -> dict:
-        ball_dist_reward = 1.0/(1.0 + self.ball_dist)
+        ball_dist_reward = 1.0/(0.025 + self.ball_dist)
         self.rew_buf[:] = ball_dist_reward
 
     def is_done(self):
