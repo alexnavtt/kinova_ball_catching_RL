@@ -1,33 +1,20 @@
 import math
-from scipy.spatial.transform import Rotation
-
-import numpy as np
-from scipy.spatial.transform import Rotation
-from omni.isaac.core.articulations import ArticulationView
-from omni.isaac.core.utils.types import ArticulationAction
-from omni.isaac.core.utils.nucleus import get_assets_root_path
-from omni.isaac.core.utils.prims import create_prim
-from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
-from omni.isaac.core.utils.viewports import set_camera_view
-from omni.isaac.core.objects import DynamicSphere
-from omni.isaac.core.prims.rigid_prim_view import RigidPrimView
-
-from omniisaacgymenvs.tasks.base.rl_task import RLTask
-
-import os
 import torch
+import numpy as np
+
 from gym import spaces
-from kinova import Kinova
-from omni.isaac.core.utils.prims import get_prim_at_path
-from kinova_view import KinovaView
-from omni.isaac.dynamic_control import _dynamic_control
+from scipy.spatial.transform import Rotation
+from omni.isaac.core.objects import DynamicSphere
+from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.utils.stage import get_current_stage
+from omni.isaac.core.utils.viewports import set_camera_view
+from omni.isaac.core.prims.rigid_prim_view import RigidPrimView
 from omni.isaac.core.utils.extensions import enable_extension
 enable_extension("omni.replicator.isaac")
-enable_extension("omni.kit.window.viewport")
-import omni.replicator.core as rep
 from omni.replicator.core.scripts.annotators import Annotator
 
-dc = _dynamic_control.acquire_dynamic_control_interface()
+from kinova import Kinova
+from omniisaacgymenvs.tasks.base.rl_task import RLTask
 
 class KinovaTask(RLTask):
     def __init__(
@@ -171,7 +158,6 @@ class KinovaTask(RLTask):
         if scene.object_exists("hands_view"):
             scene.remove_object("hands_view", registry_only=True)
 
-        # TODO: Try removing this line in set_up_scene and see if it works
         self._kinovas = ArticulationView(
             prim_paths_expr=f"{self.default_zero_env_path}/.*/kinova", 
             name="kinova_view",
