@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 from gym import spaces
+from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation
 from omni.isaac.core.objects import DynamicSphere
 from omni.isaac.core.articulations import ArticulationView
@@ -38,10 +39,10 @@ class KinovaTask(RLTask):
 
         # Set the reward function weights
         self._weights = {
-            "min_dist"  : 1.0,
+            "min_dist"  : 5.0,
             "collisions": 10.0,
-            "rel_vel"   : 0.0,
-            "alignment" : 0.0,
+            "rel_vel"   : 3.0,
+            "alignment" : 3.0,
             "catch"     : 100.0
         }
 
@@ -428,4 +429,43 @@ class KinovaTask(RLTask):
     def is_done(self):
         self.reset_buf = torch.where(self.ball_height < 0.1, torch.ones_like(self.reset_buf), self.reset_buf)
         self.reset_buf = torch.where(self.progress_buf >= self._max_episode_length-1, torch.ones_like(self.reset_buf), self.reset_buf)
+
+    def plot_results(self):
+        print("Plotting learning results")
+
+        # Plot the exact reward over time
+        plt.figure(figsize=(19.2, 12.8))
+        plt.plot(self._reward_over_time)
+        plt.xlabel("epochs")
+        plt.title("Reward")
+        plt.savefig("reward.png")
+
+        # Plot the moving average of reward over time
+        window_size = len(self._reward_over_time)//250
+        cumulative_sum = np.cumsum(np.insert(self._reward_over_time, 0, 0))
+        moving_average_reward = (cumulative_sum[window_size:] - cumulative_sum[:-window_size])/window_size
+
+        plt.figure(figsize=(19.2, 12.8))
+        plt.plot(moving_average_reward)
+        plt.xlabel("epochs")
+        plt.title("Average Reward")
+        plt.savefig("average_reward.png")
+
+        # Plot the exact success rate over time
+        plt.figure(figsize=(19.2, 12.8))
+        plt.plot(self._success_over_time)
+        plt.xlabel("epochs")
+        plt.title("Success")
+        plt.savefig("success.png")
+
+        # Plot the moving average of success rate over time
+        window_size = len(self._success_over_time)//250
+        cumulative_sum = np.cumsum(np.insert(self._success_over_time, 0, 0))
+        moving_success_rate = (cumulative_sum[window_size:] - cumulative_sum[:-window_size])/window_size
+
+        plt.figure(figsize=(19.2, 12.8))
+        plt.plot(moving_success_rate)
+        plt.xlabel("epochs")
+        plt.title("Success Rate")
+        plt.savefig("success_rate.png")
 
