@@ -1,4 +1,4 @@
-
+import os
 import math
 from typing import Optional
 
@@ -19,15 +19,13 @@ class Kinova(Robot):
         self,
         prim_path: str,
         name: Optional[str] = "kinova",
-        # usd_path: Optional[str] = "/home/alex/workspaces/cs395T/src/kinova_ball_catching_RL/models/kinova_closed_loop.usd", # Alex
-        usd_path: Optional[str] = "/home/caleb/Research/kinova_ball_catching_RL/models/kinova_closed_loop.usd", # Caleb
-        # usd_path: Optional[str] = "/home/crasun/isaacsim_ws/abc_ws/kinova_ball_catching_RL/models/kinova_closed_loop.usd", # Crasun
+        usd_path: Optional[str] = None,
         translation: Optional[torch.tensor] = None,
         orientation: Optional[torch.tensor] = None,
     ) -> None:
         """[summary]"""
 
-        self._usd_path = usd_path
+        self._usd_path = usd_path or os.path.join(os.path.dirname(__file__), "..", "models", "kinova_closed_loop.usd")
         self._name = name
 
         self._position = torch.tensor([1.0, 0.0, 0.0]) if translation is None else translation
