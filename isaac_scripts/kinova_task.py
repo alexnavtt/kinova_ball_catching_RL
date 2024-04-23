@@ -27,7 +27,6 @@ class KinovaTask(RLTask):
         
         # Simulation and training parameters
         self.update_config(sim_config)
-        self.dt = 1/60
         self._num_observations = 14     # 7 robot joint states, 1 gripper joint state and 6 ball states
         self._num_actions = 8           # 7 arm joint actions and 1 gripper joint action
 
@@ -40,10 +39,10 @@ class KinovaTask(RLTask):
         # Set the reward function weights
         self._weights = {
             "min_dist"  : 1.0,
-            "collisions": 1.0,
-            "rel_vel"   : 1.0,
-            "alignment" : 1.0,
-            "catch"     : 1.0
+            "collisions": 10.0,
+            "rel_vel"   : 0.0,
+            "alignment" : 0.0,
+            "catch"     : 100.0
         }
 
         # Define the observation and action spaces of the underlying neural network
@@ -67,17 +66,24 @@ class KinovaTask(RLTask):
             high= robot_state_space["high"]
         )
 
-        # Record the reward over time for plotting 
-        self._reward_over_time = []
-
         # trigger __init__ of parent class
         RLTask.__init__(self, name, env)
+
+        # Record the reward and success for each completed episode
+        self._reward_over_time  = []
+        self._success_over_time = []
+
+        # Record the reward and success within a single episode
+        self._reward_buffer   = torch.zeros((self._num_envs), device=self._device, dtype=torch.float32)
+        self._success_buffer  = torch.zeros((self._num_envs), device=self._device, dtype=torch.bool)
+        self._grasping_buffer = torch.zeros((self._num_envs), device=self._device, dtype=torch.int32)
 
     def update_config(self, sim_config):
         self._sim_config = sim_config
         self._cfg = sim_config.config
         self._task_cfg = sim_config.task_config
 
+        self._dt = self._task_cfg["sim"]["dt"]
         self._num_envs = self._task_cfg["env"]["numEnvs"]
         self._env_spacing = self._task_cfg["env"]["envSpacing"]
         self._max_episode_length = self._task_cfg["env"]["episodeLength"]
@@ -255,6 +261,11 @@ class KinovaTask(RLTask):
         self.ball_vel_axis = self.ball_vel/self.ball_speed.unsqueeze(dim=1)
         self.ball_height   = ball_pos[:, 2]
 
+        # Keep track of success rate (success is grasping the ball for at least 2 seconds)
+        min_frames_to_catch = 2.0/self._dt
+        self._grasping_buffer = torch.where(self.ball_gripper_dist < 0.1, self._grasping_buffer + 1, torch.zeros_like(self._grasping_buffer, dtype=torch.int32))
+        self._success_buffer  = torch.where(self._grasping_buffer > min_frames_to_catch, torch.ones_like(self._success_buffer, dtype=torch.bool), self._success_buffer)
+
         self.obs_buf = torch.cat(
             (
                 joint_pos,
@@ -325,6 +336,14 @@ class KinovaTask(RLTask):
             )
         self._balls.set_velocities(ball_vels, indices=indicies)
 
+        # Record and reset the success of the resetting envs
+        self._success_over_time.extend([elem.item() for elem in self._success_buffer[indicies].to(device="cpu")])
+        self._success_buffer[indicies] = False
+
+        # Record and reset the rewards of the resetting envs
+        self._reward_over_time.extend([elem.item() for elem in self._reward_buffer[indicies].to(device="cpu")])
+        self._reward_buffer[indicies] = 0.0
+
         # More bookkeeping
         self.reset_buf[env_ids] = 0
         self.progress_buf[env_ids] = 0
@@ -383,7 +402,7 @@ class KinovaTask(RLTask):
             - Whether the ball is within a certain threshold distance of the gripper
             - Whether the ball is stationary 
         """
-        reward = torch.zeros_like(self.rew_buf)
+        reward = torch.zeros_like(self.rew_buf, device=self._device, dtype=torch.float32)
 
         # Distance reward
         reward += self._weights["min_dist"] * 1.0/(1.0 + self.ball_gripper_dist)
@@ -400,6 +419,9 @@ class KinovaTask(RLTask):
 
         # Catching reward
         reward += self._weights["catch"] * (self.ball_speed < 0.1).to(dtype=torch.float32)
+
+        # Record the reward for each env
+        self._reward_buffer += reward
 
         self.rew_buf[:] = reward
 
