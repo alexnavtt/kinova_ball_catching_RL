@@ -25,6 +25,7 @@ from omni.isaac.core.utils.extensions import enable_extension
 enable_extension("omni.replicator.isaac")
 enable_extension("omni.kit.window.viewport")
 import omni.replicator.core as rep
+from omni.replicator.core.scripts.annotators import Annotator
 
 dc = _dynamic_control.acquire_dynamic_control_interface()
 
@@ -51,23 +52,32 @@ class KinovaTask(RLTask):
 
         # Set the reward function weights
         self._weights = {
-            "min_dist"  : 2.0,
-            "collisions": 10.0,
-            "rel_vel"   : 2.0,
+            "min_dist"  : 1.0,
+            "collisions": 1.0,
+            "rel_vel"   : 1.0,
             "alignment" : 1.0,
-            "catch"     : 50.0
+            "catch"     : 1.0
         }
 
-        # Set the action space
-        self.action_space = spaces.Box(
-            np.concatenate((self._robot_lower_joint_limits, self._gripper_lower_joint_limit)),
-            np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit))
+        # Define the observation and action spaces of the underlying neural network
+        robot_state_space = {
+            "low" : np.concatenate((self._robot_lower_joint_limits, self._gripper_lower_joint_limit)),
+            "high": np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit)),
+        }
+
+        ball_state_space = {
+            "low" : -1.0*np.ones(6,dtype=np.float32)*np.Inf,
+            "high": +1.0*np.ones(6,dtype=np.float32)*np.Inf,
+        }
+
+        self.observation_space = spaces.Box(
+            low =np.concatenate((robot_state_space["low" ], ball_state_space["low"])),
+            high=np.concatenate((robot_state_space["high"], ball_state_space["high"]))
         )
 
-        # Set the observation space (robot joints plus the ball xyz)
-        self.observation_space = spaces.Box(
-            np.concatenate((self._robot_lower_joint_limits, self._gripper_lower_joint_limit, -1.0*np.ones(6,dtype=np.float32)*np.Inf)),
-            np.concatenate((self._robot_upper_joint_limits, self._gripper_upper_joint_limit, +1.0*np.ones(6,dtype=np.float32)*np.Inf))
+        self.action_space = spaces.Box(
+            low = robot_state_space["low"],
+            high= robot_state_space["high"]
         )
 
         # Record the reward over time for plotting 
@@ -119,15 +129,32 @@ class KinovaTask(RLTask):
                 name = "right_fingers_view",
                 reset_xform_properties=False
             )
+            self._hands = RigidPrimView(
+                prim_paths_expr=f"{self.default_base_env_path}/.*/kinova/robotiq_85_base_link",
+                name = "hands_view",
+                reset_xform_properties=False
+            )
 
-            # register the ArticulationView object to the world, so that it can be initialized
+            # register the ArticulationView objects to the world, so that they can be initialized
             scene.add(self._kinovas)
             scene.add(self._lfingers)
             scene.add(self._rfingers)
             scene.add(self._balls)
+            scene.add(self._hands)
 
             # set default camera viewport position and target
             self.set_initial_camera_params()
+
+            # Add an invisible depth camera to each robot's wrist
+            if self._task_cfg["sim"]["enable_cameras"]:
+                self.rep.orchestrator._orchestrator._is_started = True
+                self.depth_cams: list[Annotator] = []
+                for robot_path in self._kinovas.prim_paths:
+                    camera_path = f"{robot_path}/end_effector_link/Camera_Xform/WristCam"
+                    rp_wrist = self.rep.create.render_product(camera_path, resolution=(10, 10))
+                    depth_camera = self.rep.AnnotatorRegistry.get_annotator("distance_to_camera")
+                    depth_camera.attach(rp_wrist)
+                    self.depth_cams.append(depth_camera)
 
             return
     
@@ -141,6 +168,8 @@ class KinovaTask(RLTask):
             scene.remove_object("left_fingers_view", registry_only=True)
         if scene.object_exists("right_fingers_view"):
             scene.remove_object("right_fingers_view", registry_only=True)
+        if scene.object_exists("hands_view"):
+            scene.remove_object("hands_view", registry_only=True)
 
         # TODO: Try removing this line in set_up_scene and see if it works
         self._kinovas = ArticulationView(
@@ -163,21 +192,22 @@ class KinovaTask(RLTask):
             name = "right_fingers_view",
             reset_xform_properties=False
         )
+        self._hands = RigidPrimView(
+            prim_paths_expr=f"{self.default_base_env_path}/.*/kinova/robotiq_85_base_link",
+            name = "hands_view",
+            reset_xform_properties=False
+        )
         scene.add(self._kinovas)
         scene.add(self._balls)
         scene.add(self._lfingers)
         scene.add(self._rfingers)
+        scene.add(self._hands)
 
     def get_kinova(self):
-        self._kinova: Kinova = Kinova(
+        self._kinova_base: Kinova = Kinova(
             prim_path=f"{self.default_zero_env_path}/kinova", 
             name="kinova"
         )
-
-        # Add an invisible depth camera to the robot's wrist (Maybe later)
-        # rp_wrist = rep.create.render_product(f"{prim_path}/end_effector_link/Camera_Xform/WristCam", (102, 51))
-        # self._depth_camera = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
-        # self._depth_camera.attach(rp_wrist)
 
     def get_ball(self, scene):
         # Add and launch the ball (this should maybe be moved to post_reset?)
@@ -204,30 +234,47 @@ class KinovaTask(RLTask):
     def get_observations(self):
         # Get the robot and ball state from the simulation
         dof_pos  = self._kinovas.get_joint_positions(clone=False)
-        ball_vel = self._balls.get_velocities(clone=False)[:,:3]
+        ball_vel = self._balls.get_velocities(clone=False)
         ball_pos, _ = self._balls.get_world_poses(clone=False)
         ball_pos = ball_pos - self._env_pos
 
         # Get the end effector position
-        lfinger_pos, _ = self._lfingers.get_world_poses()
-        rfinger_pos, _ = self._rfingers.get_world_poses()
+        lfinger_pos, _ = self._lfingers.get_world_poses(clone=False)
+        rfinger_pos, _ = self._rfingers.get_world_poses(clone=False)
         end_effector_pos = (lfinger_pos + rfinger_pos)/2 - self._env_pos
+
+        # Get the vector from the gripper to the ball
+        self.ball_offset        = ball_pos - end_effector_pos
+        self.ball_gripper_dist  = torch.norm(self.ball_offset, p=2, dim=-1)
+
+        # Get gripper and orientation (must be done on CPU because of the scipy function call)
+        hand_quats = self._hands.get_world_poses()[1].cpu()
+        hand_orientations = torch.zeros((self._num_envs, 3), device="cpu")
+        for i in range(self._num_envs):
+            gripper_quat = hand_quats[i]
+            z_axis = Rotation.from_quat([gripper_quat[1], gripper_quat[2], gripper_quat[3], gripper_quat[0]]).as_matrix()[:3,2]
+            hand_orientations[i] = torch.tensor(z_axis, device="cpu", dtype=torch.float32)
+        self.hand_orientations = hand_orientations.to(device=self._device, dtype=torch.float32)
+
+        # Record the gripper linear velocity
+        self.gripper_vel = self._hands.get_velocities()[:, :3]
 
         # Extract the information that we need for the model
         joint_pos   = dof_pos[:, 0:7]
         gripper_pos = dof_pos[:, self._gripper_dof_index_1].unsqueeze(1)
 
         # Record the data that we want to use in the reward and is_done functions
-        self.ball_dist  = torch.norm(ball_pos - end_effector_pos, p=2, dim=-1)
-        self.ball_speed = torch.norm(ball_vel, p=2, dim=-1)
-        self.ball_height = ball_pos[:, 2]
+        self.ball_vel      = ball_vel[:,:3]
+        self.ball_speed    = torch.norm(ball_vel, p=2, dim=-1)
+        self.ball_vel_axis = self.ball_vel/self.ball_speed.unsqueeze(dim=1)
+        self.ball_height   = ball_pos[:, 2]
 
         self.obs_buf = torch.cat(
             (
                 joint_pos,
                 gripper_pos,
-                ball_pos,
-                ball_vel
+                self.ball_offset, # Take in offset to ball instead of absolute ball position
+                ball_vel[:, :3]
             ),
             dim=-1
         )
@@ -255,8 +302,6 @@ class KinovaTask(RLTask):
 
         full_dof_actions = torch.zeros((self._num_envs, self._kinovas.num_dof), dtype=torch.float32)
         full_dof_actions[:,:7] = joint_state_actions[:,:7]
-        # full_dof_actions = self._kinovas.get_joint_positions(indices=[0])[0]
-        # joint_state_actions[-1] = math.radians(46)
         full_dof_actions[:, self._gripper_dof_index_1] = joint_state_actions[:, -1]
         full_dof_actions[:, self._gripper_dof_index_2] = -1.0 * joint_state_actions[:, -1]
 
@@ -343,49 +388,36 @@ class KinovaTask(RLTask):
 
         return X
     
-    def calculate_metrics(self) -> dict:
-        ball_dist_reward = 1.0/(0.025 + self.ball_dist)
-        self.rew_buf[:] = ball_dist_reward
+    def calculate_metrics(self) -> None:
+        """
+        Calculates a reward metric for the learning agent based five factors:
+            - Distance from the gripper to the ball
+            - Alignment of the gripper with the axis of motion of the ball
+            - Relative velocity between the gripper and the ball
+            - Whether the ball is within a certain threshold distance of the gripper
+            - Whether the ball is stationary 
+        """
+        reward = torch.zeros_like(self.rew_buf)
+
+        # Distance reward
+        reward += self._weights["min_dist"] * 1.0/(1.0 + self.ball_gripper_dist)
+
+        # Alignment reward
+        reward += self._weights["alignment"] * torch.sum(self.hand_orientations * self.ball_vel_axis, dim=-1) * -1.0
+
+        # Relative velocity reward
+        relative_speed = torch.norm(self.ball_vel - self.gripper_vel, p=2, dim=-1)
+        reward += self._weights["rel_vel"] * 1.0/(1.0 + relative_speed)
+
+        # Ball in range of hand reward (i.e. "collision")
+        reward += self._weights["collisions"] * (self.ball_gripper_dist < 0.1).to(dtype=torch.float32)
+
+        # Catching reward
+        reward += self._weights["catch"] * (self.ball_speed < 0.1).to(dtype=torch.float32)
+
+        self.rew_buf[:] = reward
 
     def is_done(self):
         self.reset_buf = torch.where(self.ball_height < 0.1, torch.ones_like(self.reset_buf), self.reset_buf)
         self.reset_buf = torch.where(self.progress_buf >= self._max_episode_length-1, torch.ones_like(self.reset_buf), self.reset_buf)
 
-    # def calculate_metrics(self) -> float:
-    #     # use states from the observation buffer to compute reward
-    #     # TODO: Alter this for multiple robots
-    #     joint_angles = self.obs[:7]
-    #     gripper_angle = self.obs[7]
-    #     ball_pos = np.array(self.obs[8:11])
-    #     ball_vel = np.array(self.obs[11:])
-
-    #     left_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_left_finger_tip_link"))
-    #     right_finger_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_right_finger_tip_link"))
-    #     end_effector_pose = dc.get_rigid_body_pose(dc.get_rigid_body(self._kinova.prim_path + "/end_effector_link"))
-    #     end_effector_z_axis = Rotation.from_quat(end_effector_pose.r).as_matrix()[:3,2]
-    #     ball_vel_axis = ball_vel / np.linalg.norm(ball_vel)
-    #     alignment = -1.0*np.dot(end_effector_z_axis, ball_vel_axis)
-
-    #     gripper_pos = 0.5*(np.array(left_finger_pose.p) + np.array(right_finger_pose.p))
-
-    #     gripper_vel = dc.get_rigid_body_linear_velocity(dc.get_rigid_body(self._kinova.prim_path + "/robotiq_85_base_link"))
-    #     relative_vel = np.array(gripper_vel) - ball_vel
-
-    #     # Success - whether the ball collided with the gripper
-    #     # d_min   - Minimum distance between the ball and the gripper
-    #     # H       - Whether we maintained hold of the ball
-    #     # C       - Whether we collided with robot or the ground
-    #     # reward = lambda1 * success - lambda2 * d_min + lambda3 * H - lambda4 * C
-    #     ball_gripper_dist = np.linalg.norm(gripper_pos - ball_pos)
-
-    #     reward = 0
-    #     # reward += self._weights["min_dist"  ]*ball_gripper_dist*-1.0
-    #     reward += self._weights["min_dist"  ]*(1.0/(ball_gripper_dist + 1.0))
-    #     reward *= self._weights["alignment" ]*alignment
-    #     # reward += self._weights["rel_vel"   ]*(np.linalg.norm(relative_vel))*-1.0
-    #     reward += self._weights["collisions"]*(ball_gripper_dist < 0.10)
-    #     reward += self._weights["catch" ]*(np.linalg.norm(ball_vel)<0.1 and ball_pos[2]>0.1)
-    #     reward += 1/(1 + gripper_angle)
-
-    #     self._reward_over_time.append(reward)
-    #     return reward
