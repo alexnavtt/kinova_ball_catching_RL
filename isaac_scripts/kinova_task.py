@@ -345,6 +345,11 @@ class KinovaTask(RLTask):
         self._reward_over_time.extend([elem.item() for elem in self._reward_buffer[indicies].to(device="cpu")])
         self._reward_buffer[indicies] = 0.0
 
+        # Plot testing results
+        # if len(self._reward_over_time) > 10000 and self._num_envs == 1025:
+        #     self.plot_results()
+        #     assert False
+
         # More bookkeeping
         self.reset_buf[env_ids] = 0
         self.progress_buf[env_ids] = 0
@@ -432,6 +437,7 @@ class KinovaTask(RLTask):
 
     def plot_results(self):
         print("Plotting learning results")
+        plt.rcParams.update({'font.size': 22})
 
         # Plot the exact reward over time
         plt.figure(figsize=(19.2, 12.8))
@@ -447,8 +453,9 @@ class KinovaTask(RLTask):
 
         plt.figure(figsize=(19.2, 12.8))
         plt.plot(moving_average_reward)
-        plt.xlabel("epochs")
-        plt.title("Average Reward")
+        plt.xlabel("Epochs")
+        plt.ylabel("Average Reward")
+        plt.title("Average Reward vs Training Episodes")
         plt.savefig("average_reward.png")
 
         # Plot the exact success rate over time
@@ -464,8 +471,9 @@ class KinovaTask(RLTask):
         moving_success_rate = (cumulative_sum[window_size:] - cumulative_sum[:-window_size])/window_size
 
         plt.figure(figsize=(19.2, 12.8))
-        plt.plot(moving_success_rate)
-        plt.xlabel("epochs")
-        plt.title("Success Rate")
+        plt.plot(100*moving_success_rate)
+        plt.xlabel("Epochs")
+        plt.ylabel("Success Rate (%)")
+        plt.title("Success Rate vs Training Episodes")
         plt.savefig("success_rate.png")
 
