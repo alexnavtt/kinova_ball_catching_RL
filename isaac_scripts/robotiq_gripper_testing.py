@@ -112,6 +112,7 @@ async def init():
     print(data)
 
 asyncio.ensure_future(init())
-asyncio.ensure_future(test_bbox_3d())
+#asyncio.ensure_future(test_bbox_3d())
+
 
 
